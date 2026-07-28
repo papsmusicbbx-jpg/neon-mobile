@@ -3,6 +3,7 @@ groq
 langgraph
 langchain-groq
 langchain-community
+ddgs
 duckduckgo_search
 elevenlabs
 gunicorn
