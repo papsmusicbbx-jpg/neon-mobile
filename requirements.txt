@@ -1,5 +1,6 @@
 flask
 groq
+langgraph
 langchain-groq
 langchain-community
 elevenlabs
