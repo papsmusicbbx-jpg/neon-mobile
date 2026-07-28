@@ -3,15 +3,19 @@ import re
 import datetime
 from flask import Flask, request, jsonify, render_template_string, send_from_directory
 
-# --- AI & ELEVENLABS ---
+# --- AI, ELEVENLABS & PINECONE ---
 from langchain_groq import ChatGroq
 from langchain_community.tools import DuckDuckGoSearchResults
+from langchain_pinecone import PineconeVectorStore
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
 
 # ==========================================
-# CREDENTIALS & SETUP
+# SECURE ENVIRONMENT SETUP
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -19,12 +23,38 @@ if not os.path.exists(STATIC_DIR):
     os.makedirs(STATIC_DIR)
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-ELEVENLABS_API_KEY = "sk_024866df16c46d30259cab9fd01f163ef9dd57a54b63614f"
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_024866df16c46d30259cab9fd01f163ef9dd57a54b63614f")
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+
 VOICE_ID = "nPczCjzI2devNBz1zQrb" # Rachel
+INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
-tools = [DuckDuckGoSearchResults()] 
+
+# Shared Vector Database
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+vector_store = PineconeVectorStore(
+    index_name=INDEX_NAME, 
+    embedding=embeddings, 
+    pinecone_api_key=PINECONE_API_KEY
+)
+
+@tool
+def remember_fact(fact: str) -> str:
+    """Use this tool to save important facts, preferences, or context about the user."""
+    vector_store.add_documents([Document(page_content=fact)])
+    return f"Successfully saved to shared memory: {fact}"
+
+@tool
+def recall_fact(query: str) -> str:
+    """Use this tool to search long-term memory for facts, hobbies, preferences, background."""
+    results = vector_store.similarity_search(query, k=5)
+    if not results: return "No relevant memories found in database."
+    return "\n".join([f"- {res.page_content}" for res in results])
+
+tools = [DuckDuckGoSearchResults(), remember_fact, recall_fact] 
 
 current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
 system_prompt = (
@@ -37,7 +67,7 @@ agent_executor = create_react_agent(llm, tools, prompt=system_prompt)
 chat_history = []
 
 # ==========================================
-# WEB SERVER SETUP (FLASK)
+# FLASK WEB SERVER SETUP
 # ==========================================
 app = Flask(__name__)
 
@@ -105,13 +135,13 @@ MOBILE_HTML = """
             font-family: 'Courier New', Courier, monospace;
         }
         #send-btn:active { background-color: #be185d; }
-        .typing { color: #f472b6; font-style: italic; font-size: 0.9em; align-self: flex-start; display: none;}
+        .typing { color: #f472b6; font-style: italic; font-size: 0.9em; align-self: flex-start; display: none; padding: 0 15px 5px;}
     </style>
 </head>
 <body>
-    <div id="header">⚡ N.E.O.N. // MOBILE LINK</div>
+    <div id="header">⚡ N.E.O.N. // GLOBAL LINK</div>
     <div id="chatbox">
-        <div class="msg ai-msg">Mobile link established. N.E.O.N. online.</div>
+        <div class="msg ai-msg">Global link established. N.E.O.N. online. Shared memory active.</div>
     </div>
     <div id="typing-indicator" class="typing">N.E.O.N. is processing...</div>
     <div id="input-area">
@@ -149,7 +179,6 @@ MOBILE_HTML = """
                 chatbox.innerHTML += `<div class="msg ai-msg">${data.response}</div>`;
                 chatbox.scrollTop = chatbox.scrollHeight;
 
-                // Play Rachel's voice directly on the phone
                 if (data.audio_url) {
                     const audio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                     audio.play().catch(e => console.log("Audio autoplay blocked:", e));
@@ -184,7 +213,6 @@ def chat():
         ai_response = response['messages'][-1].content
         chat_history.append(AIMessage(content=ai_response))
         
-        # Generate ElevenLabs audio file for the phone
         clean_text = re.sub(r'[*#_`~-]', '', ai_response)
         audio_filename = "response.mp3"
         audio_path = os.path.join(STATIC_DIR, audio_filename)
@@ -208,8 +236,5 @@ def chat():
         return jsonify({"response": f"System Error: {str(e)}", "audio_url": None})
 
 if __name__ == "__main__":
-    print("========================================")
-    print(" N.E.O.N. MOBILE SERVER + VOICE ACTIVE")
-    print("========================================")
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
