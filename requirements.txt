@@ -7,3 +7,7 @@ ddgs
 duckduckgo_search
 elevenlabs
 gunicorn
+pinecone-client
+langchain-pinecone
+langchain-huggingface
+sentence-transformers
