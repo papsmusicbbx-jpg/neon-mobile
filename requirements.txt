@@ -1,0 +1,6 @@
+flask
+groq
+langchain-groq
+langchain-community
+elevenlabs
+gunicorn
