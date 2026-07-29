@@ -24,13 +24,13 @@ if not os.path.exists(STATIC_DIR):
     os.makedirs(STATIC_DIR)
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_024866df16c46d30259cab9fd01f163ef9dd57a54b63614f")
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 
 VOICE_ID = "nPczCjzI2devNBz1zQrb"  # Rachel
 INDEX_NAME = "neon-memory"
 
-eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
 # Serverless Embedding Class (0 MB Local RAM, 100% Pinecone Compatible)
@@ -232,7 +232,7 @@ def chat():
         audio_filename = "response.mp3"
         audio_path = os.path.join(STATIC_DIR, audio_filename)
         
-        if clean_text.strip():
+        if clean_text.strip() and eleven_client:
             audio_generator = eleven_client.text_to_speech.convert(
                 text=clean_text, voice_id=VOICE_ID, model_id="eleven_flash_v2_5", output_format="mp3_44100_128"
             )
