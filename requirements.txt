@@ -8,4 +8,5 @@ ddgs
 duckduckgo-search
 elevenlabs
 pinecone
+langchain-pinecone
 requests
