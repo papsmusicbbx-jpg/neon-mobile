@@ -39,14 +39,35 @@ class ServerlessEmbeddings(Embeddings):
         return [self.embed_query(t) for t in texts]
 
     def embed_query(self, text: str) -> list[float]:
-        url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
-        response = requests.post(url, json={"inputs": text, "options": {"wait_for_model": True}})
-        res = response.json()
+        hf_token = os.environ.get("HF_TOKEN", "")
+        headers = {}
+        if hf_token:
+            headers["Authorization"] = f"Bearer {hf_token}"
+
+        url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+        response = requests.post(
+            url, 
+            headers=headers, 
+            json={"inputs": text, "options": {"wait_for_model": True}},
+            timeout=10
+        )
+
+        if response.status_code != 200:
+            raise Exception(f"HF API {response.status_code}: {response.text[:100]}")
+
+        try:
+            res = response.json()
+        except Exception:
+            raise Exception(f"Invalid response from HF API: {response.text[:100]}")
+
         if isinstance(res, list):
             if len(res) > 0 and isinstance(res[0], list):
                 return res[0]
             return res
-        raise Exception(f"HF Embedding Error: {res}")
+        elif isinstance(res, dict) and "error" in res:
+            raise Exception(f"HF Model Error: {res['error']}")
+        
+        raise Exception(f"Unexpected HF response format: {res}")
 
 embeddings = ServerlessEmbeddings()
 
