@@ -1,13 +1,11 @@
 flask
+gunicorn
 groq
 langgraph
 langchain-groq
 langchain-community
 ddgs
-duckduckgo_search
+duckduckgo-search
 elevenlabs
-gunicorn
 pinecone-client
-langchain-pinecone
-langchain-huggingface
-sentence-transformers
+requests

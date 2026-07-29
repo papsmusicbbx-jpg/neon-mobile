@@ -1,192 +1,91 @@
 import os
-import re
-import datetime
-from flask import Flask, request, jsonify, render_template_string, send_from_directory
-
-# --- AI, ELEVENLABS & PINECONE ---
+import requests
+import uuid
+from flask import Flask, render_template_string, request, jsonify
 from langchain_groq import ChatGroq
-from langchain_community.tools import DuckDuckGoSearchResults
-from langchain_pinecone import PineconeVectorStore
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.documents import Document
-from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import HumanMessage, AIMessage
-from elevenlabs.client import ElevenLabs
+from pinecone import Pinecone
 
-# ==========================================
-# SECURE ENVIRONMENT SETUP
-# ==========================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-if not os.path.exists(STATIC_DIR):
-    os.makedirs(STATIC_DIR)
-
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "sk_024866df16c46d30259cab9fd01f163ef9dd57a54b63614f")
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
-
-VOICE_ID = "nPczCjzI2devNBz1zQrb" # Rachel
-INDEX_NAME = "neon-memory"
-
-eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
-
-# Shared Vector Database
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-
-vector_store = PineconeVectorStore(
-    index_name=INDEX_NAME, 
-    embedding=embeddings, 
-    pinecone_api_key=PINECONE_API_KEY
-)
-
-@tool
-def remember_fact(fact: str) -> str:
-    """Use this tool to save important facts, preferences, or context about the user."""
-    vector_store.add_documents([Document(page_content=fact)])
-    return f"Successfully saved to shared memory: {fact}"
-
-@tool
-def recall_fact(query: str) -> str:
-    """Use this tool to search long-term memory for facts, hobbies, preferences, background."""
-    results = vector_store.similarity_search(query, k=5)
-    if not results: return "No relevant memories found in database."
-    return "\n".join([f"- {res.page_content}" for res in results])
-
-tools = [DuckDuckGoSearchResults(), remember_fact, recall_fact] 
-
-current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
-system_prompt = (
-    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile device. "
-    f"Today's date is {current_date}. "
-    f"Keep your answers concise, intelligent, and optimized for reading on a small phone screen."
-)
-
-agent_executor = create_react_agent(llm, tools, prompt=system_prompt)
-chat_history = []
-
-# ==========================================
-# FLASK WEB SERVER SETUP
-# ==========================================
 app = Flask(__name__)
 
-MOBILE_HTML = """
+# Load API Keys from Render Environment Variables
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+
+# Initialize Pinecone Index
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index = pc.Index("neon-memory")
+
+# Initialize Groq LLM
+llm = ChatGroq(temperature=0.7, model_name="llama-3.3-70b-versatile", groq_api_key=GROQ_API_KEY)
+
+# Serverless API Embedding function (0 MB local RAM usage)
+def get_embedding(text):
+    api_url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
+    response = requests.post(api_url, json={"inputs": text, "options": {"wait_for_model": True}})
+    res = response.json()
+    if isinstance(res, list) and isinstance(res[0], list):
+        return res[0]
+    return res
+
+def recall_memory(query_text):
+    try:
+        vector = get_embedding(query_text)
+        results = index.query(vector=vector, top_k=3, include_metadata=True)
+        memories = [match['metadata']['text'] for match in results.get('matches', []) if 'metadata' in match]
+        return "\n".join(memories) if memories else "No relevant stored memories."
+    except Exception as e:
+        return f"Memory recall error: {str(e)}"
+
+def store_memory(text_to_remember):
+    try:
+        vector = get_embedding(text_to_remember)
+        index.upsert(vectors=[(str(uuid.uuid4()), vector, {"text": text_to_remember})])
+        return "Memory successfully stored in Pinecone."
+    except Exception as e:
+        return f"Memory storage error: {str(e)}"
+
+# Cyberpunk Mobile HUD Interface
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>N.E.O.N. Mobile</title>
     <style>
-        body {
-            background-color: #09090b;
-            color: #e2e8f0;
-            font-family: 'Courier New', Courier, monospace;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-        #header {
-            background-color: #14060d;
-            color: #f472b6;
-            padding: 15px;
-            text-align: center;
-            font-weight: bold;
-            border-bottom: 2px solid #db2777;
-            box-shadow: 0 4px 10px rgba(219, 39, 119, 0.2);
-        }
-        #chatbox {
-            flex-grow: 1;
-            padding: 15px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        .msg { padding: 10px 14px; border-radius: 8px; max-width: 85%; word-wrap: break-word; }
-        .user-msg { background-color: #3b0724; color: #fbcfe8; align-self: flex-end; border: 1px solid #be185d; }
-        .ai-msg { background-color: #050505; color: #e2e8f0; align-self: flex-start; border: 1px solid #3b0724; }
-        #input-area {
-            display: flex;
-            padding: 10px;
-            background-color: #14060d;
-            border-top: 1px solid #3b0724;
-        }
-        #user-input {
-            flex-grow: 1;
-            background-color: #050505;
-            color: #f8fafc;
-            border: 1px solid #be185d;
-            padding: 12px;
-            border-radius: 4px;
-            font-family: 'Courier New', Courier, monospace;
-        }
-        #user-input:focus { outline: none; border-color: #f472b6; }
-        #send-btn {
-            background-color: #db2777;
-            color: white;
-            border: none;
-            padding: 0 20px;
-            margin-left: 10px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-family: 'Courier New', Courier, monospace;
-        }
-        #send-btn:active { background-color: #be185d; }
-        .typing { color: #f472b6; font-style: italic; font-size: 0.9em; align-self: flex-start; display: none; padding: 0 15px 5px;}
+        body { background-color: #0d0d0d; color: #00ffcc; font-family: monospace; padding: 15px; margin: 0; }
+        #chat { height: 70vh; overflow-y: auto; border: 1px solid #00ffcc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        .msg { margin: 8px 0; }
+        .user { color: #ff007f; }
+        .agent { color: #00ffcc; }
+        input { width: 70%; padding: 10px; background: #1a1a1a; border: 1px solid #00ffcc; color: white; border-radius: 5px; }
+        button { width: 25%; padding: 10px; background: #00ffcc; border: none; color: black; font-weight: bold; border-radius: 5px; }
     </style>
 </head>
 <body>
-    <div id="header">⚡ N.E.O.N. // GLOBAL LINK</div>
-    <div id="chatbox">
-        <div class="msg ai-msg">Global link established. N.E.O.N. online. Shared memory active.</div>
-    </div>
-    <div id="typing-indicator" class="typing">N.E.O.N. is processing...</div>
-    <div id="input-area">
-        <input type="text" id="user-input" placeholder="Enter command..." onkeypress="handleKeyPress(event)">
-        <button id="send-btn" onclick="sendMessage()">EXEC</button>
-    </div>
+    <h3>N.E.O.N. MOBILE LINK</h3>
+    <div id="chat"></div>
+    <input type="text" id="user-input" placeholder="Communicate...">
+    <button onclick="sendMessage()">SEND</button>
 
     <script>
-        const chatbox = document.getElementById('chatbox');
-        const input = document.getElementById('user-input');
-        const typingIndicator = document.getElementById('typing-indicator');
-
-        function handleKeyPress(e) {
-            if (e.key === 'Enter') sendMessage();
-        }
-
         async function sendMessage() {
+            const input = document.getElementById("user-input");
+            const chat = document.getElementById("chat");
             const text = input.value.trim();
-            if (!text) return;
+            if(!text) return;
 
-            chatbox.innerHTML += `<div class="msg user-msg">${text}</div>`;
-            input.value = '';
-            chatbox.scrollTop = chatbox.scrollHeight;
-            typingIndicator.style.display = 'block';
+            chat.innerHTML += `<div class="msg user">> ${text}</div>`;
+            input.value = "";
+            chat.scrollTop = chat.scrollHeight;
 
-            try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text })
-                });
-                const data = await response.json();
-                
-                typingIndicator.style.display = 'none';
-                chatbox.innerHTML += `<div class="msg ai-msg">${data.response}</div>`;
-                chatbox.scrollTop = chatbox.scrollHeight;
-
-                if (data.audio_url) {
-                    const audio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    audio.play().catch(e => console.log("Audio autoplay blocked:", e));
-                }
-            } catch (error) {
-                typingIndicator.style.display = 'none';
-                chatbox.innerHTML += `<div class="msg ai-msg" style="color:red;">Error connecting to host.</div>`;
-            }
+            const res = await fetch("/chat", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({message: text})
+            });
+            const data = await res.json();
+            chat.innerHTML += `<div class="msg agent">NEON: ${data.response}</div>`;
+            chat.scrollTop = chat.scrollHeight;
         }
     </script>
 </body>
@@ -195,46 +94,27 @@ MOBILE_HTML = """
 
 @app.route("/")
 def home():
-    return render_template_string(MOBILE_HTML)
-
-@app.route("/static/<path:filename>")
-def serve_static(filename):
-    return send_from_directory(STATIC_DIR, filename)
+    return render_template_string(HTML_TEMPLATE)
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    global chat_history
-    user_message = request.json.get("message", "")
+    user_msg = request.json.get("message", "")
     
-    try:
-        chat_history.append(HumanMessage(content=user_message))
-        response = agent_executor.invoke({"messages": chat_history})
-        
-        ai_response = response['messages'][-1].content
-        chat_history.append(AIMessage(content=ai_response))
-        
-        clean_text = re.sub(r'[*#_`~-]', '', ai_response)
-        audio_filename = "response.mp3"
-        audio_path = os.path.join(STATIC_DIR, audio_filename)
-        
-        if clean_text.strip():
-            audio_generator = eleven_client.text_to_speech.convert(
-                text=clean_text, voice_id=VOICE_ID, model_id="eleven_flash_v2_5", output_format="mp3_44100_128"
-            )
-            with open(audio_path, "wb") as f:
-                for chunk in audio_generator:
-                    if chunk: f.write(chunk)
-            audio_url = f"/static/{audio_filename}?v=1"
-        else:
-            audio_url = None
+    context = recall_memory(user_msg)
+    
+    prompt = f"""You are N.E.O.N., a concise cyberpunk AI assistant.
+Relevant Memories: {context}
 
-        return jsonify({
-            "response": ai_response.replace('\n', '<br>'),
-            "audio_url": audio_url
-        })
-    except Exception as e:
-        return jsonify({"response": f"System Error: {str(e)}", "audio_url": None})
+User: {user_msg}
+N.E.O.N.:"""
+
+    response = llm.invoke(prompt)
+    bot_reply = response.content
+
+    if "remember" in user_msg.lower():
+        store_memory(user_msg)
+
+    return jsonify({"response": bot_reply})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
