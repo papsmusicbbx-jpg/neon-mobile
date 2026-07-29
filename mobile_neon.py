@@ -44,12 +44,13 @@ class ServerlessEmbeddings(Embeddings):
         if hf_token:
             headers["Authorization"] = f"Bearer {hf_token}"
 
-        url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+        # Official updated Hugging Face router endpoint
+        url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
         response = requests.post(
             url, 
             headers=headers, 
             json={"inputs": text, "options": {"wait_for_model": True}},
-            timeout=10
+            timeout=15
         )
 
         if response.status_code != 200:
