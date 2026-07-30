@@ -411,7 +411,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 2.9<br>
+                        SYS.VER: 3.0<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -796,38 +796,29 @@ def chat():
     try:
         if image_b64:
             hf_token = os.environ.get("HF_TOKEN", "")
-            headers_auth = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+            headers = {
+                "x-wait-for-model": "true",
+                "Content-Type": "application/json"
+            }
+            if hf_token:
+                headers["Authorization"] = f"Bearer {hf_token}"
             
-            # Hugging Face Router Models
             hf_vision_models = [
                 "Salesforce/blip-image-captioning",
                 "Salesforce/blip-image-captioning-large",
                 "nlpconnect/vit-gpt2-image-captioning"
             ]
             
-            img_bytes = base64.b64decode(image_b64)
             caption = None
             error_logs = []
             
+            # Clean image string (ensure zero prefix)
+            clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
+            
             for model_path in hf_vision_models:
                 url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
-                
-                # Attempt 1: Raw Octet-Stream
                 try:
-                    headers_bin = {**headers_auth, "Content-Type": "application/octet-stream", "x-wait-for-model": "true"}
-                    hf_res = requests.post(url, headers=headers_bin, data=img_bytes, timeout=20)
-                    if hf_res.status_code == 200:
-                        res_json = hf_res.json()
-                        if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                            caption = res_json[0]["generated_text"]
-                            break
-                except Exception:
-                    pass
-                
-                # Attempt 2: Base64 JSON Payload
-                try:
-                    headers_json = {**headers_auth, "Content-Type": "application/json"}
-                    hf_res = requests.post(url, headers=headers_json, json={"inputs": f"data:image/jpeg;base64,{image_b64}"}, timeout=20)
+                    hf_res = requests.post(url, headers=headers, json={"inputs": clean_b64}, timeout=20)
                     if hf_res.status_code == 200:
                         res_json = hf_res.json()
                         if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
