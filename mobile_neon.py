@@ -383,17 +383,15 @@ MOBILE_HTML = """
         const appContainer = document.getElementById('app-container');
 
         function goToScreen(screenIndex) {
-            currentScreen = Math.max(0, Math.min(1, screenIndex)); // Strictly clamp between 0 and 1
+            currentScreen = Math.max(0, Math.min(1, screenIndex));
             appContainer.style.transform = `translateX(-${currentScreen * 100}vw)`;
         }
 
         function handleSwipe() {
             const diffX = touchendX - touchstartX;
             if (diffX < -40) {
-                // Swipe Left -> Go to Screen 1 (Commands)
                 goToScreen(1);
             } else if (diffX > 40) {
-                // Swipe Right -> Go to Screen 0 (Chat)
                 goToScreen(0);
             }
         }
@@ -407,15 +405,17 @@ MOBILE_HTML = """
             handleSwipe(); 
         }, { passive: true });
 
-        // Prevent native browser dragging outside scrollable chat box
         document.addEventListener('touchmove', function(e) {
             if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container')) {
                 e.preventDefault();
             }
         }, { passive: false });
 
-        // --- KEYBOARD LOGIC ---
+        // --- KEYBOARD & AUDIO MANAGERS ---
         let kbString = "";
+        let isProcessing = false;  // Lock flag against duplicate taps
+        let currentAudio = null;   // Active audio instance tracker
+
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
         const chatBox = document.getElementById('chat-box');
@@ -434,16 +434,28 @@ MOBILE_HTML = """
         
         // --- MACRO BUTTON LOGIC ---
         function sendMacro(text) {
+            if (isProcessing) return; // Prevent ghost click execution
             kbString = text;
             executeKeyboard();
         }
 
         // --- MAIN CHAT LOGIC ---
         async function executeKeyboard() {
+            if (isProcessing) return; // Lock execution
+
             const text = kbString.trim();
             if(text === "") {
                 closeKeyboard();
                 return;
+            }
+
+            isProcessing = true; // Engage request lock
+
+            // Stop any currently playing audio immediately
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+                currentAudio = null;
             }
 
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`;
@@ -472,14 +484,17 @@ MOBILE_HTML = """
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
                 chatBox.scrollTop = chatBox.scrollHeight;
 
+                // Play single instance of audio
                 if (data.audio_url) {
-                    const audio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    audio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
+                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                    currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
                 }
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId);
                 if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
+            } finally {
+                isProcessing = false; // Release lock when complete
             }
         }
 
