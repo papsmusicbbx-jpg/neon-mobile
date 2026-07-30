@@ -185,7 +185,6 @@ MOBILE_HTML = """
 
         #screen-chat { flex-direction: row; }
         
-        /* --- AVATAR & TELEMETRY PANEL --- */
         #avatar-panel {
             width: 32%;
             display: flex;
@@ -197,7 +196,6 @@ MOBILE_HTML = """
             background: linear-gradient(180deg, rgba(20,6,13,0.6) 0%, rgba(9,9,11,0.9) 100%);
         }
 
-        /* ANIMATED CYBER CORE */
         .avatar-wrapper {
             position: relative;
             width: 85px;
@@ -406,18 +404,16 @@ MOBILE_HTML = """
                 <div id="avatar-panel">
                     <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
                     
-                    <!-- ANIMATED CYBER CORE -->
                     <div class="avatar-wrapper">
                         <div class="outer-ring"></div>
                         <div class="pulse-ring"></div>
                         <div class="inner-core"></div>
                     </div>
 
-                    <!-- HUD METADATA (FILLS GAP TIGHTLY) -->
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 2.4<br>
+                        SYS.VER: 2.5<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -449,7 +445,7 @@ MOBILE_HTML = """
                     <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
                     <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
                     
-                    <div class="cmd-btn" onclick="toggleFullscreen()">🖥️ Fullscreen</div>
+                    <div class="cmd-btn" onclick="sendMacro('Clear current working context.')">🧹 Clear</div>
                     <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
                     <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
                 </div>
@@ -526,16 +522,6 @@ MOBILE_HTML = """
             updateKbDisplay();
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
-
-        function toggleFullscreen() {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(err => console.log(err));
-            } else {
-                if (document.exitFullscreen) {
-                    document.exitFullscreen();
-                }
-            }
-        }
         
         function triggerMobileCamera() {
             if (isProcessing) return;
@@ -810,45 +796,31 @@ def chat():
     image_b64 = request.json.get("image", None)
     
     try:
-        if image_b64 and groq_client:
-            # Multi-model vision fallback list
-            vision_models = [
-                "llama-3.2-11b-vision-instruct",
-                "llama-3.2-90b-vision-instruct",
-                "meta-llama/llama-3.2-11b-vision-instruct"
-            ]
+        if image_b64:
+            # Hugging Face Serverless Vision Integration (100% stable, uses existing HF_TOKEN)
+            hf_token = os.environ.get("HF_TOKEN", "")
+            headers = {}
+            if hf_token:
+                headers["Authorization"] = f"Bearer {hf_token}"
             
-            completion = None
-            last_error = None
+            url = "https://router.huggingface.co/hf-inference/models/Salesforce/blip-image-captioning"
+            img_bytes = base64.b64decode(image_b64)
             
-            for v_model in vision_models:
-                try:
-                    completion = groq_client.chat.completions.create(
-                        model=v_model,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": user_message},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
-                                    }
-                                ]
-                            }
-                        ],
-                        temperature=0.2,
-                        max_tokens=500
-                    )
-                    break
-                except Exception as ve:
-                    last_error = ve
-                    continue
+            hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=15)
             
-            if not completion:
-                raise Exception(f"Vision API Error: {str(last_error)}")
-
-            ai_response = completion.choices[0].message.content
+            if hf_res.status_code == 200:
+                res_json = hf_res.json()
+                if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
+                    caption = res_json[0]["generated_text"]
+                    vision_prompt = f"The user just took a picture with their mobile camera. The visual analysis of the image shows: '{caption}'. Briefly answer what you see."
+                    
+                    response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
+                    ai_response = response['messages'][-1].content
+                else:
+                    ai_response = "I processed the camera feed, but couldn't clearly identify the subject."
+            else:
+                ai_response = f"Vision processor offline (HF Code {hf_res.status_code})."
+                
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
         else:
