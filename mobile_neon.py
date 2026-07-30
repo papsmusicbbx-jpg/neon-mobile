@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
+from groq import Groq
 
 # ==========================================
 # SECURE ENVIRONMENT SETUP
@@ -32,6 +33,7 @@ VOICE_ID = "nPczCjzI2devNBz1zQrb"
 INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
 # Serverless Embedding Class
@@ -411,7 +413,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 3.0<br>
+                        SYS.VER: 3.1<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -583,7 +585,7 @@ MOBILE_HTML = """
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
-                        message: "Describe what you see in this picture in detail.",
+                        message: "Describe what you see in this picture concise and clearly.",
                         image: base64Image 
                     })
                 });
@@ -794,52 +796,49 @@ def chat():
     image_b64 = request.json.get("image", None)
     
     try:
-        if image_b64:
-            hf_token = os.environ.get("HF_TOKEN", "")
-            headers = {
-                "x-wait-for-model": "true",
-                "Content-Type": "application/json"
-            }
-            if hf_token:
-                headers["Authorization"] = f"Bearer {hf_token}"
-            
-            hf_vision_models = [
-                "Salesforce/blip-image-captioning",
-                "Salesforce/blip-image-captioning-large",
-                "nlpconnect/vit-gpt2-image-captioning"
-            ]
-            
-            caption = None
-            error_logs = []
-            
-            # Clean image string (ensure zero prefix)
+        if image_b64 and groq_client:
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
             
-            for model_path in hf_vision_models:
-                url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
+            # Active Groq Vision Model Array with Fallback
+            vision_models = [
+                "llama-3.2-11b-vision-instruct",
+                "llama-3.2-90b-vision-instruct",
+                "llama-3.2-11b-vision-preview"
+            ]
+            
+            completion = None
+            last_err = None
+            
+            for v_model in vision_models:
                 try:
-                    hf_res = requests.post(url, headers=headers, json={"inputs": clean_b64}, timeout=20)
-                    if hf_res.status_code == 200:
-                        res_json = hf_res.json()
-                        if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                            caption = res_json[0]["generated_text"]
-                            break
-                        elif isinstance(res_json, dict) and "generated_text" in res_json:
-                            caption = res_json["generated_text"]
-                            break
-                    else:
-                        error_logs.append(f"[{model_path}: Code {hf_res.status_code}]")
-                except Exception as ex:
-                    error_logs.append(f"[{model_path}: {str(ex)[:30]}]")
+                    completion = groq_client.chat.completions.create(
+                        model=v_model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": user_message},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{clean_b64}"
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        temperature=0.2,
+                        max_tokens=300
+                    )
+                    break
+                except Exception as ve:
+                    last_err = ve
                     continue
             
-            if caption:
-                vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{caption}'. Briefly describe what you see in character as N.E.O.N."
-                response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
-                ai_response = response['messages'][-1].content
+            if completion:
+                ai_response = completion.choices[0].message.content
             else:
-                details = " ".join(error_logs) if error_logs else "No active endpoint response"
-                ai_response = f"Vision feed captured, but models failed to respond: {details}"
+                ai_response = f"Groq Vision Engine Error: {str(last_err)[:100]}"
                 
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
