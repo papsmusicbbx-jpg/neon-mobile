@@ -415,7 +415,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 4.0<br>
+                        SYS.VER: 4.1<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -804,9 +804,9 @@ def chat():
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
             img_bytes = base64.b64decode(clean_b64)
             
-            # Instantaneous Gemini Flash Vision call (no cold starts, no timeouts)
+            # Updated to active Google Gemini Flash model
             response = gemini_client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=[
                     types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
                     user_message if user_message else "Describe what you see in this picture clearly."
