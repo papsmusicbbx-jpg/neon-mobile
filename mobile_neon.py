@@ -15,7 +15,6 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
-from groq import Groq
 
 # ==========================================
 # SECURE ENVIRONMENT SETUP
@@ -33,7 +32,6 @@ VOICE_ID = "nPczCjzI2devNBz1zQrb"
 INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
 # Serverless Embedding Class
@@ -413,7 +411,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 2.6<br>
+                        SYS.VER: 2.7<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -798,37 +796,44 @@ def chat():
     try:
         if image_b64:
             hf_token = os.environ.get("HF_TOKEN", "")
-            headers = {"Content-Type": "image/jpeg"}
+            headers = {
+                "x-wait-for-model": "true"
+            }
             if hf_token:
                 headers["Authorization"] = f"Bearer {hf_token}"
             
-            # High-reliability Hugging Face vision models
             hf_vision_models = [
                 "Salesforce/blip-image-captioning",
+                "Salesforce/blip-image-captioning-large",
                 "nlpconnect/vit-gpt2-image-captioning"
             ]
             
             img_bytes = base64.b64decode(image_b64)
             caption = None
+            error_logs = []
             
             for model_path in hf_vision_models:
                 try:
-                    url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
-                    hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=15)
+                    url = f"https://api-inference.huggingface.co/models/{model_path}"
+                    hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=25)
                     if hf_res.status_code == 200:
                         res_json = hf_res.json()
                         if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
                             caption = res_json[0]["generated_text"]
                             break
-                except Exception:
+                    else:
+                        error_logs.append(f"[{model_path}: Code {hf_res.status_code}]")
+                except Exception as ex:
+                    error_logs.append(f"[{model_path}: {str(ex)[:30]}]")
                     continue
             
             if caption:
-                vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{caption}'. Provide a brief, intelligent summary of what you see."
+                vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{caption}'. Briefly describe what you see in character as N.E.O.N."
                 response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
                 ai_response = response['messages'][-1].content
             else:
-                ai_response = "Vision feed captured, but unable to analyze the frame geometry."
+                details = " ".join(error_logs) if error_logs else "No active endpoint response"
+                ai_response = f"Vision feed captured, but models failed to respond: {details}"
                 
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
