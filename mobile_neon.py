@@ -413,7 +413,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 2.5<br>
+                        SYS.VER: 2.6<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -797,29 +797,38 @@ def chat():
     
     try:
         if image_b64:
-            # Hugging Face Serverless Vision Integration (100% stable, uses existing HF_TOKEN)
             hf_token = os.environ.get("HF_TOKEN", "")
-            headers = {}
+            headers = {"Content-Type": "image/jpeg"}
             if hf_token:
                 headers["Authorization"] = f"Bearer {hf_token}"
             
-            url = "https://router.huggingface.co/hf-inference/models/Salesforce/blip-image-captioning"
+            # High-reliability Hugging Face vision models
+            hf_vision_models = [
+                "Salesforce/blip-image-captioning",
+                "nlpconnect/vit-gpt2-image-captioning"
+            ]
+            
             img_bytes = base64.b64decode(image_b64)
+            caption = None
             
-            hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=15)
+            for model_path in hf_vision_models:
+                try:
+                    url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
+                    hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=15)
+                    if hf_res.status_code == 200:
+                        res_json = hf_res.json()
+                        if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
+                            caption = res_json[0]["generated_text"]
+                            break
+                except Exception:
+                    continue
             
-            if hf_res.status_code == 200:
-                res_json = hf_res.json()
-                if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                    caption = res_json[0]["generated_text"]
-                    vision_prompt = f"The user just took a picture with their mobile camera. The visual analysis of the image shows: '{caption}'. Briefly answer what you see."
-                    
-                    response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
-                    ai_response = response['messages'][-1].content
-                else:
-                    ai_response = "I processed the camera feed, but couldn't clearly identify the subject."
+            if caption:
+                vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{caption}'. Provide a brief, intelligent summary of what you see."
+                response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
+                ai_response = response['messages'][-1].content
             else:
-                ai_response = f"Vision processor offline (HF Code {hf_res.status_code})."
+                ai_response = "Vision feed captured, but unable to analyze the frame geometry."
                 
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
