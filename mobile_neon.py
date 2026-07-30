@@ -413,7 +413,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 3.1<br>
+                        SYS.VER: 3.2<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -796,58 +796,93 @@ def chat():
     image_b64 = request.json.get("image", None)
     
     try:
-        if image_b64 and groq_client:
+        ai_response = None
+        error_logs = []
+
+        if image_b64:
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
             
-            # Active Groq Vision Model Array with Fallback
-            vision_models = [
-                "llama-3.2-11b-vision-instruct",
-                "llama-3.2-90b-vision-instruct",
-                "llama-3.2-11b-vision-preview"
-            ]
-            
-            completion = None
-            last_err = None
-            
-            for v_model in vision_models:
-                try:
-                    completion = groq_client.chat.completions.create(
-                        model=v_model,
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [
+            # --- PHASE 1: Groq Vision (Production Models) ---
+            if groq_client and not ai_response:
+                groq_models = [
+                    "llama-3.2-90b-vision-instruct",
+                    "llama-3.2-11b-vision-instruct",
+                    "llama-3.2-90b-vision",
+                    "llama-3.2-11b-vision"
+                ]
+                for m in groq_models:
+                    try:
+                        comp = groq_client.chat.completions.create(
+                            model=m,
+                            messages=[
+                                {"role": "user", "content": [
                                     {"type": "text", "text": user_message},
-                                    {
-                                        "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:image/jpeg;base64,{clean_b64}"
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        temperature=0.2,
-                        max_tokens=300
-                    )
-                    break
-                except Exception as ve:
-                    last_err = ve
-                    continue
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_b64}"}}
+                                ]}
+                            ],
+                            temperature=0.2,
+                            max_tokens=300
+                        )
+                        ai_response = comp.choices[0].message.content
+                        break
+                    except Exception as e:
+                        error_logs.append(f"G[{m}]: {str(e)[:25]}")
+                        continue
             
-            if completion:
-                ai_response = completion.choices[0].message.content
-            else:
-                ai_response = f"Groq Vision Engine Error: {str(last_err)[:100]}"
+            # --- PHASE 2: Hugging Face Serverless Fallback ---
+            hf_caption = None
+            hf_token = os.environ.get("HF_TOKEN", "")
+
+            if not ai_response and hf_token:
+                img_bytes = base64.b64decode(clean_b64)
+                hf_models = ["Salesforce/blip-image-captioning", "nlpconnect/vit-gpt2-image-captioning"]
                 
+                # Attempt A: HF Router (No Content-Type header so requests library sends it natively)
+                for m in hf_models:
+                    try:
+                        url = f"https://router.huggingface.co/hf-inference/models/{m}"
+                        res = requests.post(url, headers={"Authorization": f"Bearer {hf_token}"}, data=img_bytes, timeout=10)
+                        if res.status_code == 200 and isinstance(res.json(), list):
+                            hf_caption = res.json()[0].get('generated_text')
+                            break
+                        else:
+                            error_logs.append(f"HFR[{m}]: {res.status_code}")
+                    except Exception as e:
+                        error_logs.append(f"HFR[{m}]: {str(e)[:20]}")
+                
+                # Attempt B: HF Legacy API
+                if not hf_caption:
+                    for m in hf_models:
+                        try:
+                            url = f"https://api-inference.huggingface.co/models/{m}"
+                            res = requests.post(url, headers={"Authorization": f"Bearer {hf_token}"}, data=img_bytes, timeout=10)
+                            if res.status_code == 200 and isinstance(res.json(), list):
+                                hf_caption = res.json()[0].get('generated_text')
+                                break
+                            else:
+                                error_logs.append(f"HFL[{m}]: {res.status_code}")
+                        except Exception as e:
+                            error_logs.append(f"HFL[{m}]: {str(e)[:20]}")
+                
+                if hf_caption:
+                    vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{hf_caption}'. Answer their prompt: '{user_message}' in character as N.E.O.N."
+                    response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
+                    ai_response = response['messages'][-1].content
+            
+            if not ai_response:
+                ai_response = f"Vision feed captured, but all cloud processing engines failed. Diagnostics: {' | '.join(error_logs)}"
+            
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
+            
         else:
+            # Standard Text Chat
             chat_history.append(HumanMessage(content=user_message))
             response = agent_executor.invoke({"messages": chat_history})
             ai_response = response['messages'][-1].content
             chat_history.append(AIMessage(content=ai_response))
         
+        # Audio Processing
         clean_text = re.sub(r'[*#_`~-]', '', ai_response)
         audio_filename = "response.mp3"
         audio_path = os.path.join(STATIC_DIR, audio_filename)
