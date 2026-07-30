@@ -107,7 +107,6 @@ chat_history = []
 # ==========================================
 app = Flask(__name__)
 
-# --- INJECTED MOBILE ARM-DECK UI (LOCKED BOUNDARIES) ---
 MOBILE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -208,7 +207,7 @@ MOBILE_HTML = """
             overflow-y: auto;
             font-size: 13px;
             margin-bottom: 10px;
-            touch-action: pan-y; /* Allow internal scrolling for chat messages */
+            touch-action: pan-y;
         }
 
         .mic-btn {
@@ -233,7 +232,7 @@ MOBILE_HTML = """
             flex-grow: 1;
             overflow-y: auto;
             padding-bottom: 10px;
-            touch-action: pan-y; /* Allow internal vertical grid scrolling if needed */
+            touch-action: pan-y;
         }
 
         .cmd-btn {
@@ -349,7 +348,7 @@ MOBILE_HTML = """
                     <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ ⌨️ OPEN BIG KEYBOARD ]</div>
                     
                     <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
-                    <div class="cmd-btn" onclick="sendMacro('What is my current location?')">📍 Location</div>
+                    <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
                     <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
                     
                     <div class="cmd-btn" onclick="sendMacro('Search the web for the latest tech news.')">🌐 News</div>
@@ -379,7 +378,7 @@ MOBILE_HTML = """
         // --- STRICT SWIPE SNAP & BOUNDARY LOCK ---
         let touchstartX = 0;
         let touchendX = 0;
-        let currentScreen = 0; // 0 = Chat, 1 = Commands
+        let currentScreen = 0;
         const appContainer = document.getElementById('app-container');
 
         function goToScreen(screenIndex) {
@@ -411,10 +410,10 @@ MOBILE_HTML = """
             }
         }, { passive: false });
 
-        // --- KEYBOARD & AUDIO MANAGERS ---
+        // --- KEYBOARD, AUDIO & STATE MANAGERS ---
         let kbString = "";
-        let isProcessing = false;  // Lock flag against duplicate taps
-        let currentAudio = null;   // Active audio instance tracker
+        let isProcessing = false;
+        let currentAudio = null;
 
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
@@ -432,16 +431,51 @@ MOBILE_HTML = """
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
         
+        // --- GPS LOCATION LOGIC ---
+        function getLocationAndSend() {
+            if (isProcessing) return;
+
+            if (!navigator.geolocation) {
+                sendMacro("What is my current location?");
+                return;
+            }
+
+            chatBox.innerHTML += `<br>> <span style="color: var(--main); font-style: italic;">> Acquiring satellite GPS fix...</span>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+
+                    try {
+                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+                        const data = await res.json();
+                        const address = data.display_name || `Latitude ${lat}, Longitude ${lon}`;
+                        
+                        sendMacro(`My physical GPS location is currently ${address}. Acknowledge my location.`);
+                    } catch (e) {
+                        sendMacro(`My GPS coordinates are Latitude: ${lat}, Longitude: ${lon}. Tell me where I am.`);
+                    }
+                },
+                (error) => {
+                    console.log("GPS Error:", error);
+                    alert("Location access denied or unavailable. Please enable Location/GPS in your phone browser settings.");
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
         // --- MACRO BUTTON LOGIC ---
         function sendMacro(text) {
-            if (isProcessing) return; // Prevent ghost click execution
+            if (isProcessing) return;
             kbString = text;
             executeKeyboard();
         }
 
         // --- MAIN CHAT LOGIC ---
         async function executeKeyboard() {
-            if (isProcessing) return; // Lock execution
+            if (isProcessing) return;
 
             const text = kbString.trim();
             if(text === "") {
@@ -449,9 +483,8 @@ MOBILE_HTML = """
                 return;
             }
 
-            isProcessing = true; // Engage request lock
+            isProcessing = true;
 
-            // Stop any currently playing audio immediately
             if (currentAudio) {
                 currentAudio.pause();
                 currentAudio.currentTime = 0;
@@ -468,7 +501,7 @@ MOBILE_HTML = """
             kbString = "";
             updateKbDisplay();
             closeKeyboard();
-            goToScreen(0); // Snap back to chat screen cleanly
+            goToScreen(0);
 
             try {
                 const response = await fetch('/chat', {
@@ -484,7 +517,6 @@ MOBILE_HTML = """
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
                 chatBox.scrollTop = chatBox.scrollHeight;
 
-                // Play single instance of audio
                 if (data.audio_url) {
                     currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                     currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
@@ -494,7 +526,7 @@ MOBILE_HTML = """
                 if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
             } finally {
-                isProcessing = false; // Release lock when complete
+                isProcessing = false;
             }
         }
 
