@@ -36,7 +36,7 @@ eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY els
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
-# Serverless Embedding Class (0 MB Local RAM, 100% Pinecone Compatible)
+# Serverless Embedding Class
 class ServerlessEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self.embed_query(t) for t in texts]
@@ -318,7 +318,7 @@ MOBILE_HTML = """
 </head>
 <body>
 
-    <!-- HIDDEN CAMERA INPUT FOR MOBILE REAR CAMERA CAPTURE -->
+    <!-- HIDDEN CAMERA INPUT -->
     <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none;" onchange="handleCameraCapture(event)">
 
     <div id="viewport-wrapper">
@@ -338,7 +338,7 @@ MOBILE_HTML = """
                         <span style="color: var(--main);">> Global link established.</span><br>
                         <span style="color: var(--main);">> N.E.O.N. online.</span><br>
                     </div>
-                    <div class="mic-btn" onclick="toggleMic()">HOLD TO SPEAK</div>
+                    <div class="mic-btn" id="mic-button-el" onclick="toggleMic()">HOLD TO SPEAK</div>
                 </div>
             </div>
 
@@ -434,7 +434,7 @@ MOBILE_HTML = """
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
         
-        // --- MOBILE CAMERA CAPTURE LOGIC ---
+        // --- CLIENT-SIDE IMAGE RESIZING & CAMERA LOGIC ---
         function triggerMobileCamera() {
             if (isProcessing) return;
             document.getElementById('camera-file-input').click();
@@ -446,11 +446,33 @@ MOBILE_HTML = """
 
             const reader = new FileReader();
             reader.onload = function(e) {
-                const base64Data = e.target.result.split(',')[1];
-                sendImageToNeon(base64Data);
+                const img = new Image();
+                img.onload = function() {
+                    // Resize to max 800px to avoid hitting Render payload limits
+                    const canvas = document.createElement('canvas');
+                    const maxDim = 800;
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    if (width > height) {
+                        if (width > maxDim) { height *= maxDim / width; width = maxDim; }
+                    } else {
+                        if (height > maxDim) { width *= maxDim / height; height = maxDim; }
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Compress to JPEG Base64 (~80KB)
+                    const resizedBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+                    sendImageToNeon(resizedBase64);
+                };
+                img.src = e.target.result;
             };
             reader.readAsDataURL(file);
-            event.target.value = ''; // Reset file input
+            event.target.value = ''; 
         }
 
         async function sendImageToNeon(base64Image) {
@@ -463,14 +485,14 @@ MOBILE_HTML = """
                 currentAudio = null;
             }
 
-            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured image via rear camera]`;
+            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`;
             chatBox.scrollTop = chatBox.scrollHeight;
 
             const thinkingId = "think-" + Date.now();
             chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`;
             chatBox.scrollTop = chatBox.scrollHeight;
 
-            goToScreen(0); // Snap to chat view
+            goToScreen(0); 
 
             try {
                 const response = await fetch('/chat', {
@@ -531,18 +553,20 @@ MOBILE_HTML = """
                 },
                 (error) => {
                     console.log("GPS Error:", error);
-                    alert("Location access denied or unavailable. Please enable Location/GPS in your phone browser settings.");
+                    alert("Location access denied. Please enable Location/GPS in browser settings.");
                 },
                 { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
             );
         }
 
-        // --- NATIVE MOBILE SPEECH RECOGNITION (MIC) ---
+        // --- MOBILE SPEECH RECOGNITION (MIC) ENGINE ---
         let recognition = null;
         let isListening = false;
 
-        if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+        function initSpeechEngine() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return false;
+
             recognition = new SpeechRecognition();
             recognition.continuous = false;
             recognition.interimResults = false;
@@ -550,7 +574,7 @@ MOBILE_HTML = """
 
             recognition.onstart = function() {
                 isListening = true;
-                const micBtn = document.querySelector('.mic-btn');
+                const micBtn = document.getElementById('mic-button-el');
                 micBtn.innerText = "🎙️ LISTENING...";
                 micBtn.style.background = "var(--accent)";
                 micBtn.style.color = "#fff";
@@ -559,23 +583,27 @@ MOBILE_HTML = """
 
             recognition.onresult = function(event) {
                 const transcript = event.results[0][0].transcript;
-                console.log("Voice Input Captured:", transcript);
+                console.log("Voice Captured:", transcript);
                 sendMacro(transcript);
             };
 
             recognition.onerror = function(event) {
                 console.log("Speech Error:", event.error);
+                if (event.error === 'not-allowed') {
+                    alert("Microphone permission denied! Tap the lock icon in your browser URL bar to allow microphone access.");
+                }
                 stopListeningUI();
             };
 
             recognition.onend = function() {
                 stopListeningUI();
             };
+            return true;
         }
 
         function stopListeningUI() {
             isListening = false;
-            const micBtn = document.querySelector('.mic-btn');
+            const micBtn = document.getElementById('mic-button-el');
             micBtn.innerText = "HOLD TO SPEAK";
             micBtn.style.background = "var(--bg)";
             micBtn.style.color = "var(--main)";
@@ -585,8 +613,8 @@ MOBILE_HTML = """
         function toggleMic() {
             if (isProcessing) return;
 
-            if (!recognition) {
-                alert("Speech recognition is not supported on this mobile browser. Try Chrome or Safari.");
+            if (!recognition && !initSpeechEngine()) {
+                alert("Speech recognition is not supported on this browser version. Try iOS Safari or Android Chrome.");
                 return;
             }
 
@@ -596,7 +624,9 @@ MOBILE_HTML = """
                 try {
                     recognition.start();
                 } catch(e) {
-                    console.log("Mic restart error:", e);
+                    console.log("Mic start catch:", e);
+                    initSpeechEngine();
+                    recognition.start();
                 }
             }
         }
@@ -682,10 +712,9 @@ def chat():
     image_b64 = request.json.get("image", None)
     
     try:
-        # Check if an image payload was sent from the phone's camera
         if image_b64 and groq_client:
             completion = groq_client.chat.completions.create(
-                model="qwen/qwen3.6-27b",
+                model="llama-3.2-11b-vision-preview",
                 messages=[
                     {
                         "role": "user",
