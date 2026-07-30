@@ -411,7 +411,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 2.7<br>
+                        SYS.VER: 2.8<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -797,11 +797,13 @@ def chat():
         if image_b64:
             hf_token = os.environ.get("HF_TOKEN", "")
             headers = {
-                "x-wait-for-model": "true"
+                "x-wait-for-model": "true",
+                "Content-Type": "image/jpeg"
             }
             if hf_token:
                 headers["Authorization"] = f"Bearer {hf_token}"
             
+            # Active Hugging Face Router models
             hf_vision_models = [
                 "Salesforce/blip-image-captioning",
                 "Salesforce/blip-image-captioning-large",
@@ -814,8 +816,8 @@ def chat():
             
             for model_path in hf_vision_models:
                 try:
-                    url = f"https://api-inference.huggingface.co/models/{model_path}"
-                    hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=25)
+                    url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
+                    hf_res = requests.post(url, headers=headers, data=img_bytes, timeout=20)
                     if hf_res.status_code == 200:
                         res_json = hf_res.json()
                         if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
