@@ -15,7 +15,6 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
-from groq import Groq
 
 # ==========================================
 # SECURE ENVIRONMENT SETUP
@@ -33,7 +32,6 @@ VOICE_ID = "nPczCjzI2devNBz1zQrb"
 INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
 # Serverless Embedding Class
@@ -413,7 +411,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 3.2<br>
+                        SYS.VER: 3.3<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -797,81 +795,51 @@ def chat():
     
     try:
         ai_response = None
-        error_logs = []
 
         if image_b64:
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
+            img_bytes = base64.b64decode(clean_b64)
             
-            # --- PHASE 1: Groq Vision (Production Models) ---
-            if groq_client and not ai_response:
-                groq_models = [
-                    "llama-3.2-90b-vision-instruct",
-                    "llama-3.2-11b-vision-instruct",
-                    "llama-3.2-90b-vision",
-                    "llama-3.2-11b-vision"
-                ]
-                for m in groq_models:
-                    try:
-                        comp = groq_client.chat.completions.create(
-                            model=m,
-                            messages=[
-                                {"role": "user", "content": [
-                                    {"type": "text", "text": user_message},
-                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{clean_b64}"}}
-                                ]}
-                            ],
-                            temperature=0.2,
-                            max_tokens=300
-                        )
-                        ai_response = comp.choices[0].message.content
-                        break
-                    except Exception as e:
-                        error_logs.append(f"G[{m}]: {str(e)[:25]}")
-                        continue
-            
-            # --- PHASE 2: Hugging Face Serverless Fallback ---
-            hf_caption = None
             hf_token = os.environ.get("HF_TOKEN", "")
+            hf_caption = None
 
-            if not ai_response and hf_token:
-                img_bytes = base64.b64decode(clean_b64)
-                hf_models = ["Salesforce/blip-image-captioning", "nlpconnect/vit-gpt2-image-captioning"]
+            if hf_token:
+                # Use HF standard Inference API
+                headers = {
+                    "Authorization": f"Bearer {hf_token}",
+                    "x-wait-for-model": "true"
+                }
                 
-                # Attempt A: HF Router (No Content-Type header so requests library sends it natively)
+                hf_models = [
+                    "Salesforce/blip-image-captioning",
+                    "Salesforce/blip-image-captioning-large",
+                    "nlpconnect/vit-gpt2-image-captioning"
+                ]
+                
                 for m in hf_models:
                     try:
-                        url = f"https://router.huggingface.co/hf-inference/models/{m}"
-                        res = requests.post(url, headers={"Authorization": f"Bearer {hf_token}"}, data=img_bytes, timeout=10)
-                        if res.status_code == 200 and isinstance(res.json(), list):
-                            hf_caption = res.json()[0].get('generated_text')
-                            break
-                        else:
-                            error_logs.append(f"HFR[{m}]: {res.status_code}")
-                    except Exception as e:
-                        error_logs.append(f"HFR[{m}]: {str(e)[:20]}")
-                
-                # Attempt B: HF Legacy API
-                if not hf_caption:
-                    for m in hf_models:
-                        try:
-                            url = f"https://api-inference.huggingface.co/models/{m}"
-                            res = requests.post(url, headers={"Authorization": f"Bearer {hf_token}"}, data=img_bytes, timeout=10)
-                            if res.status_code == 200 and isinstance(res.json(), list):
-                                hf_caption = res.json()[0].get('generated_text')
+                        url = f"https://api-inference.huggingface.co/models/{m}"
+                        # Increased timeout to 45s to allow Sleeping Models to wake up
+                        res = requests.post(url, headers=headers, data=img_bytes, timeout=45)
+                        
+                        if res.status_code == 200:
+                            res_json = res.json()
+                            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
+                                hf_caption = res_json[0]["generated_text"]
                                 break
-                            else:
-                                error_logs.append(f"HFL[{m}]: {res.status_code}")
-                        except Exception as e:
-                            error_logs.append(f"HFL[{m}]: {str(e)[:20]}")
+                    except requests.exceptions.Timeout:
+                        # Model is waking up but took too long. We move to next model or gracefully fail.
+                        continue
+                    except Exception:
+                        continue
+            
+            if hf_caption:
+                vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{hf_caption}'. Answer their prompt: '{user_message}' concise and in character as N.E.O.N."
+                response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
+                ai_response = response['messages'][-1].content
+            else:
+                ai_response = "Vision feed captured, but my optic servers timed out while cold-booting. Please snap the picture again."
                 
-                if hf_caption:
-                    vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{hf_caption}'. Answer their prompt: '{user_message}' in character as N.E.O.N."
-                    response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
-                    ai_response = response['messages'][-1].content
-            
-            if not ai_response:
-                ai_response = f"Vision feed captured, but all cloud processing engines failed. Diagnostics: {' | '.join(error_logs)}"
-            
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
             
