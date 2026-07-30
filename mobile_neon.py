@@ -714,7 +714,7 @@ def chat():
     try:
         if image_b64 and groq_client:
             completion = groq_client.chat.completions.create(
-                model="llama-3.2-11b-vision-preview",
+                model="llama-3.2-90b-vision-preview",  # Updated active Groq vision model ID
                 messages=[
                     {
                         "role": "user",
