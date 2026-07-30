@@ -2,6 +2,7 @@ import os
 import re
 import datetime
 import requests
+import base64
 from flask import Flask, request, jsonify, render_template_string, send_from_directory
 
 # --- AI, ELEVENLABS & PINECONE ---
@@ -14,6 +15,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
+from groq import Groq
 
 # ==========================================
 # SECURE ENVIRONMENT SETUP
@@ -31,6 +33,7 @@ VOICE_ID = "nPczCjzI2devNBz1zQrb"
 INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
 # Serverless Embedding Class (0 MB Local RAM, 100% Pinecone Compatible)
@@ -135,7 +138,6 @@ MOBILE_HTML = """
             font-family: 'Courier New', Courier, monospace; 
         }
         
-        /* HARD LOCK BODY & HTML TO PREVENT BROWSER PANNING */
         html, body {
             position: fixed;
             top: 0;
@@ -156,7 +158,6 @@ MOBILE_HTML = """
             overflow: hidden;
         }
 
-        /* --- MAIN LAYOUT SLIDER --- */
         #app-container {
             display: flex;
             width: 200vw; 
@@ -179,7 +180,6 @@ MOBILE_HTML = """
             overflow: hidden;
         }
 
-        /* --- SCREEN 1: TERMINAL & CHAT --- */
         #screen-chat { flex-direction: row; }
         
         #avatar-panel {
@@ -220,9 +220,12 @@ MOBILE_HTML = """
             font-size: 16px;
             border-radius: 8px;
             box-shadow: 0 0 10px var(--dark);
+            transition: all 0.2s ease;
+        }
+        .mic-btn:active {
+            transform: scale(0.98);
         }
 
-        /* --- SCREEN 2: QUICK COMMANDS --- */
         #screen-commands { flex-direction: column; }
         
         .grid-container {
@@ -257,7 +260,6 @@ MOBILE_HTML = """
             font-size: 15px;
         }
 
-        /* --- BIG TACTICAL KEYBOARD OVERLAY --- */
         #keyboard-overlay {
             position: fixed;
             top: 100vh;
@@ -316,6 +318,9 @@ MOBILE_HTML = """
 </head>
 <body>
 
+    <!-- HIDDEN CAMERA INPUT FOR MOBILE REAR CAMERA CAPTURE -->
+    <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none;" onchange="handleCameraCapture(event)">
+
     <div id="viewport-wrapper">
         <div id="app-container">
             
@@ -352,7 +357,7 @@ MOBILE_HTML = """
                     <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
                     
                     <div class="cmd-btn" onclick="sendMacro('Search the web for the latest tech news.')">🌐 News</div>
-                    <div class="cmd-btn" onclick="sendMacro('Clear current working context.')">🧹 Clear</div>
+                    <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
                     <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
                 </div>
             </div>
@@ -375,7 +380,6 @@ MOBILE_HTML = """
     </div>
 
     <script>
-        // --- STRICT SWIPE SNAP & BOUNDARY LOCK ---
         let touchstartX = 0;
         let touchendX = 0;
         let currentScreen = 0;
@@ -410,7 +414,6 @@ MOBILE_HTML = """
             }
         }, { passive: false });
 
-        // --- KEYBOARD, AUDIO & STATE MANAGERS ---
         let kbString = "";
         let isProcessing = false;
         let currentAudio = null;
@@ -431,6 +434,74 @@ MOBILE_HTML = """
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
         
+        // --- MOBILE CAMERA CAPTURE LOGIC ---
+        function triggerMobileCamera() {
+            if (isProcessing) return;
+            document.getElementById('camera-file-input').click();
+        }
+
+        function handleCameraCapture(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64Data = e.target.result.split(',')[1];
+                sendImageToNeon(base64Data);
+            };
+            reader.readAsDataURL(file);
+            event.target.value = ''; // Reset file input
+        }
+
+        async function sendImageToNeon(base64Image) {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+                currentAudio = null;
+            }
+
+            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured image via rear camera]`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            const thinkingId = "think-" + Date.now();
+            chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            goToScreen(0); // Snap to chat view
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message: "Describe what you see in this picture in detail.",
+                        image: base64Image 
+                    })
+                });
+                const data = await response.json();
+
+                const thnkEl = document.getElementById(thinkingId);
+                if(thnkEl) thnkEl.remove();
+
+                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
+                chatBox.scrollTop = chatBox.scrollHeight;
+
+                if (data.audio_url) {
+                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                    currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
+                }
+            } catch (error) {
+                const thnkEl = document.getElementById(thinkingId);
+                if(thnkEl) thnkEl.remove();
+                chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
+            } finally {
+                isProcessing = false;
+            }
+        }
+
         // --- GPS LOCATION LOGIC ---
         function getLocationAndSend() {
             if (isProcessing) return;
@@ -466,14 +537,76 @@ MOBILE_HTML = """
             );
         }
 
-        // --- MACRO BUTTON LOGIC ---
+        // --- NATIVE MOBILE SPEECH RECOGNITION (MIC) ---
+        let recognition = null;
+        let isListening = false;
+
+        if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = function() {
+                isListening = true;
+                const micBtn = document.querySelector('.mic-btn');
+                micBtn.innerText = "🎙️ LISTENING...";
+                micBtn.style.background = "var(--accent)";
+                micBtn.style.color = "#fff";
+                micBtn.style.boxShadow = "0 0 18px var(--main)";
+            };
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                console.log("Voice Input Captured:", transcript);
+                sendMacro(transcript);
+            };
+
+            recognition.onerror = function(event) {
+                console.log("Speech Error:", event.error);
+                stopListeningUI();
+            };
+
+            recognition.onend = function() {
+                stopListeningUI();
+            };
+        }
+
+        function stopListeningUI() {
+            isListening = false;
+            const micBtn = document.querySelector('.mic-btn');
+            micBtn.innerText = "HOLD TO SPEAK";
+            micBtn.style.background = "var(--bg)";
+            micBtn.style.color = "var(--main)";
+            micBtn.style.boxShadow = "0 0 10px var(--dark)";
+        }
+
+        function toggleMic() {
+            if (isProcessing) return;
+
+            if (!recognition) {
+                alert("Speech recognition is not supported on this mobile browser. Try Chrome or Safari.");
+                return;
+            }
+
+            if (isListening) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch(e) {
+                    console.log("Mic restart error:", e);
+                }
+            }
+        }
+
         function sendMacro(text) {
             if (isProcessing) return;
             kbString = text;
             executeKeyboard();
         }
 
-        // --- MAIN CHAT LOGIC ---
         async function executeKeyboard() {
             if (isProcessing) return;
 
@@ -529,11 +662,6 @@ MOBILE_HTML = """
                 isProcessing = false;
             }
         }
-
-        function toggleMic() {
-            chatBox.innerHTML += "<br>> <span style='color: var(--accent)'>[Mic Input System Offline - Awaiting Integration]</span>";
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
     </script>
 </body>
 </html>
@@ -551,13 +679,36 @@ def serve_static(filename):
 def chat():
     global chat_history
     user_message = request.json.get("message", "")
+    image_b64 = request.json.get("image", None)
     
     try:
-        chat_history.append(HumanMessage(content=user_message))
-        response = agent_executor.invoke({"messages": chat_history})
-        
-        ai_response = response['messages'][-1].content
-        chat_history.append(AIMessage(content=ai_response))
+        # Check if an image payload was sent from the phone's camera
+        if image_b64 and groq_client:
+            completion = groq_client.chat.completions.create(
+                model="qwen/qwen3.6-27b",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_message},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                            }
+                        ]
+                    }
+                ],
+                temperature=0.2,
+                max_tokens=500
+            )
+            ai_response = completion.choices[0].message.content
+            chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
+            chat_history.append(AIMessage(content=ai_response))
+        else:
+            chat_history.append(HumanMessage(content=user_message))
+            response = agent_executor.invoke({"messages": chat_history})
+            ai_response = response['messages'][-1].content
+            chat_history.append(AIMessage(content=ai_response))
         
         clean_text = re.sub(r'[*#_`~-]', '', ai_response)
         audio_filename = "response.mp3"
