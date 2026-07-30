@@ -5,7 +5,7 @@ import requests
 import base64
 from flask import Flask, request, jsonify, render_template_string, send_from_directory
 
-# --- AI, ELEVENLABS & PINECONE ---
+# --- AI, ELEVENLABS & GEMINI ---
 from langchain_groq import ChatGroq
 from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_pinecone import PineconeVectorStore
@@ -15,6 +15,8 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
+from google import genai
+from google.genai import types
 
 # ==========================================
 # SECURE ENVIRONMENT SETUP
@@ -27,11 +29,13 @@ if not os.path.exists(STATIC_DIR):
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 VOICE_ID = "nPczCjzI2devNBz1zQrb"
 INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
 # Serverless Embedding Class
@@ -411,7 +415,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 3.3<br>
+                        SYS.VER: 4.0<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -796,53 +800,24 @@ def chat():
     try:
         ai_response = None
 
-        if image_b64:
+        if image_b64 and gemini_client:
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
             img_bytes = base64.b64decode(clean_b64)
             
-            hf_token = os.environ.get("HF_TOKEN", "")
-            hf_caption = None
-
-            if hf_token:
-                # Use HF standard Inference API
-                headers = {
-                    "Authorization": f"Bearer {hf_token}",
-                    "x-wait-for-model": "true"
-                }
-                
-                hf_models = [
-                    "Salesforce/blip-image-captioning",
-                    "Salesforce/blip-image-captioning-large",
-                    "nlpconnect/vit-gpt2-image-captioning"
+            # Instantaneous Gemini Flash Vision call (no cold starts, no timeouts)
+            response = gemini_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+                    user_message if user_message else "Describe what you see in this picture clearly."
                 ]
-                
-                for m in hf_models:
-                    try:
-                        url = f"https://api-inference.huggingface.co/models/{m}"
-                        # Increased timeout to 45s to allow Sleeping Models to wake up
-                        res = requests.post(url, headers=headers, data=img_bytes, timeout=45)
-                        
-                        if res.status_code == 200:
-                            res_json = res.json()
-                            if isinstance(res_json, list) and len(res_json) > 0 and "generated_text" in res_json[0]:
-                                hf_caption = res_json[0]["generated_text"]
-                                break
-                    except requests.exceptions.Timeout:
-                        # Model is waking up but took too long. We move to next model or gracefully fail.
-                        continue
-                    except Exception:
-                        continue
+            )
+            ai_response = response.text
             
-            if hf_caption:
-                vision_prompt = f"The user captured an image with their mobile camera. Visual scan output: '{hf_caption}'. Answer their prompt: '{user_message}' concise and in character as N.E.O.N."
-                response = agent_executor.invoke({"messages": [HumanMessage(content=vision_prompt)]})
-                ai_response = response['messages'][-1].content
-            else:
-                ai_response = "Vision feed captured, but my optic servers timed out while cold-booting. Please snap the picture again."
-                
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
-            
+        elif image_b64 and not gemini_client:
+            ai_response = "Error: GEMINI_API_KEY environment variable is missing on Render."
         else:
             # Standard Text Chat
             chat_history.append(HumanMessage(content=user_message))

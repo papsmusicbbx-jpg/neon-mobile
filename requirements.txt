@@ -10,3 +10,4 @@ elevenlabs
 pinecone-client
 langchain-pinecone
 requests
+google-genai
