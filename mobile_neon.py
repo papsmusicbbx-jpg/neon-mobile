@@ -118,6 +118,9 @@ MOBILE_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#09090b">
+    <link rel="manifest" href='data:application/json,{"name":"N.E.O.N. HUD","short_name":"NEON","start_url":"/","display":"standalone","orientation":"landscape","background_color":"#09090b","theme_color":"#09090b"}'>
     <title>N.E.O.N. Mobile HUD</title>
     <style>
         :root {
@@ -175,27 +178,96 @@ MOBILE_HTML = """
             height: 100vh;
             flex-shrink: 0;
             display: flex;
-            padding: 10px;
+            padding: 8px;
             box-sizing: border-box;
             overflow: hidden;
         }
 
         #screen-chat { flex-direction: row; }
         
+        /* --- AVATAR & TELEMETRY PANEL --- */
         #avatar-panel {
-            width: 30%;
+            width: 32%;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: space-between;
             border-right: 2px solid var(--bg);
+            padding: 10px 5px;
+            background: linear-gradient(180deg, rgba(20,6,13,0.6) 0%, rgba(9,9,11,0.9) 100%);
+        }
+
+        /* ANIMATED CYBER CORE */
+        .avatar-wrapper {
+            position: relative;
+            width: 85px;
+            height: 85px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 10px 0;
+        }
+
+        .outer-ring {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 2px dashed var(--accent);
+            animation: rotateRing 14s linear infinite;
+            opacity: 0.85;
+        }
+
+        .pulse-ring {
+            position: absolute;
+            width: 82%;
+            height: 82%;
+            border-radius: 50%;
+            border: 2px solid var(--main);
+            box-shadow: 0 0 15px var(--accent), inset 0 0 10px var(--accent);
+            animation: pulseGlow 2.5s ease-in-out infinite alternate;
+        }
+
+        .inner-core {
+            width: 34px;
+            height: 34px;
+            background: var(--text-bright);
+            border-radius: 50%;
+            box-shadow: 0 0 18px #fff, 0 0 30px var(--main);
+            animation: coreBeat 1.8s ease-in-out infinite alternate;
+        }
+
+        @keyframes rotateRing {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulseGlow {
+            0% { transform: scale(0.96); box-shadow: 0 0 10px var(--accent), inset 0 0 5px var(--accent); }
+            100% { transform: scale(1.04); box-shadow: 0 0 22px var(--main), inset 0 0 14px var(--main); }
+        }
+
+        @keyframes coreBeat {
+            0% { transform: scale(0.88); opacity: 0.85; }
+            100% { transform: scale(1.12); opacity: 1; }
+        }
+
+        .hud-stat-box {
+            width: 100%;
+            background: #050505;
+            border: 1px solid var(--bg);
+            border-radius: 4px;
+            padding: 6px;
+            font-size: 9px;
+            color: var(--main);
+            line-height: 1.4;
         }
 
         #terminal-panel {
-            width: 70%;
+            width: 68%;
             display: flex;
             flex-direction: column;
-            padding-left: 10px;
+            padding-left: 8px;
         }
 
         #chat-box {
@@ -206,21 +278,23 @@ MOBILE_HTML = """
             padding: 10px;
             overflow-y: auto;
             font-size: 13px;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             touch-action: pan-y;
+            border-radius: 4px;
         }
 
         .mic-btn {
             background: var(--bg);
             color: var(--main);
             border: 2px solid var(--accent);
-            padding: 14px;
+            padding: 12px;
             text-align: center;
             font-weight: bold;
-            font-size: 16px;
-            border-radius: 8px;
+            font-size: 15px;
+            border-radius: 6px;
             box-shadow: 0 0 10px var(--dark);
             transition: all 0.2s ease;
+            flex-shrink: 0;
         }
         .mic-btn:active {
             transform: scale(0.98);
@@ -231,10 +305,11 @@ MOBILE_HTML = """
         .grid-container {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
+            grid-auto-rows: 1fr;
+            gap: 8px;
             flex-grow: 1;
             overflow-y: auto;
-            padding-bottom: 10px;
+            padding-bottom: 5px;
             touch-action: pan-y;
         }
 
@@ -242,7 +317,7 @@ MOBILE_HTML = """
             background: #14060d;
             border: 1px solid var(--accent);
             color: var(--main);
-            padding: 15px 5px;
+            padding: 12px 5px;
             font-size: 12px;
             font-weight: bold;
             text-align: center;
@@ -250,6 +325,7 @@ MOBILE_HTML = """
             display: flex;
             align-items: center;
             justify-content: center;
+            transition: background 0.15s ease;
         }
         .cmd-btn:active { background: var(--accent); color: #fff; }
 
@@ -257,7 +333,7 @@ MOBILE_HTML = """
             background: var(--accent);
             color: #fff;
             grid-column: span 3;
-            font-size: 15px;
+            font-size: 14px;
         }
 
         #keyboard-overlay {
@@ -270,7 +346,7 @@ MOBILE_HTML = """
             z-index: 999;
             display: flex;
             flex-direction: column;
-            padding: 10px;
+            padding: 8px;
             transition: top 0.25s ease-out;
             box-sizing: border-box;
         }
@@ -279,14 +355,15 @@ MOBILE_HTML = """
             background: #000;
             color: var(--main);
             border: 2px solid var(--accent);
-            height: 50px;
+            height: 48px;
             font-size: 18px;
             padding: 10px;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
             display: flex;
             align-items: center;
             overflow: hidden;
             flex-shrink: 0;
+            border-radius: 4px;
         }
 
         #kb-grid {
@@ -327,16 +404,32 @@ MOBILE_HTML = """
             <!-- SCREEN 1: TERMINAL -->
             <div id="screen-chat" class="screen">
                 <div id="avatar-panel">
-                    <div style="color: var(--main); font-weight: bold; margin-bottom: 10px;">⚡ N.E.O.N.</div>
-                    <div style="width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--accent); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 15px var(--accent);">
-                        <div style="width: 35px; height: 35px; background: var(--text-bright); border-radius: 50%;"></div>
+                    <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
+                    
+                    <!-- ANIMATED CYBER CORE -->
+                    <div class="avatar-wrapper">
+                        <div class="outer-ring"></div>
+                        <div class="pulse-ring"></div>
+                        <div class="inner-core"></div>
                     </div>
-                    <div style="margin-top: 15px; font-size: 9px; color: var(--main); text-align: center;">SWIPE LEFT ➔<br>FOR COMMANDS</div>
+
+                    <!-- HUD METADATA (FILLS GAP TIGHTLY) -->
+                    <div class="hud-stat-box">
+                        STATUS: ACTIVE<br>
+                        LINK: ONLINE<br>
+                        SYS.VER: 2.4<br>
+                        AUDIO: 11LABS
+                    </div>
+
+                    <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">
+                        SWIPE LEFT ➔<br>COMMAND DECK
+                    </div>
                 </div>
+                
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: var(--main);">> N.E.O.N. online.</span><br>
+                        <span style="color: var(--main);">> N.E.O.N. neural core online.</span><br>
                     </div>
                     <div class="mic-btn" id="mic-button-el" onclick="toggleMic()">HOLD TO SPEAK</div>
                 </div>
@@ -344,19 +437,19 @@ MOBILE_HTML = """
 
             <!-- SCREEN 2: QUICK COMMANDS -->
             <div id="screen-commands" class="screen">
-                <div style="color: var(--main); font-weight: bold; margin-bottom: 8px;">
+                <div style="color: var(--main); font-weight: bold; margin-bottom: 6px; font-size: 11px;">
                     <span style="float: left;" onclick="goToScreen(0)">← SWIPE RIGHT</span> 
-                    &nbsp;&nbsp;&nbsp;QUICK MACROS 
+                    &nbsp;&nbsp;&nbsp;COMMAND DECK // MACROS
                 </div>
                 
                 <div class="grid-container">
-                    <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ ⌨️ OPEN BIG KEYBOARD ]</div>
+                    <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ OPEN TACTICAL KEYBOARD ]</div>
                     
                     <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
                     <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
                     <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
                     
-                    <div class="cmd-btn" onclick="sendMacro('Search the web for the latest tech news.')">🌐 News</div>
+                    <div class="cmd-btn" onclick="toggleFullscreen()">🖥️ Fullscreen</div>
                     <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
                     <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
                 </div>
@@ -375,7 +468,7 @@ MOBILE_HTML = """
             <div class="kb-key kb-close" onclick="closeKeyboard()">CLOSE</div>
             <div class="kb-key" onclick="typeChar('.')">.</div>
             <div class="kb-key kb-space" onclick="typeChar(' ')">SPACE</div>
-            <div class="kb-key kb-exec" onclick="executeKeyboard()">⚡ EXECUTE</div>
+            <div class="kb-key kb-exec" onclick="executeKeyboard()">[ EXECUTE ]</div>
         </div>
     </div>
 
@@ -433,8 +526,17 @@ MOBILE_HTML = """
             updateKbDisplay();
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        }
         
-        // --- CLIENT-SIDE IMAGE RESIZING & CAMERA LOGIC ---
         function triggerMobileCamera() {
             if (isProcessing) return;
             document.getElementById('camera-file-input').click();
@@ -448,7 +550,6 @@ MOBILE_HTML = """
             reader.onload = function(e) {
                 const img = new Image();
                 img.onload = function() {
-                    // Resize to max 800px to avoid hitting Render payload limits
                     const canvas = document.createElement('canvas');
                     const maxDim = 800;
                     let width = img.width;
@@ -465,7 +566,6 @@ MOBILE_HTML = """
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
                     
-                    // Compress to JPEG Base64 (~80KB)
                     const resizedBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
                     sendImageToNeon(resizedBase64);
                 };
@@ -524,7 +624,6 @@ MOBILE_HTML = """
             }
         }
 
-        // --- GPS LOCATION LOGIC ---
         function getLocationAndSend() {
             if (isProcessing) return;
 
@@ -559,7 +658,6 @@ MOBILE_HTML = """
             );
         }
 
-        // --- MOBILE SPEECH RECOGNITION (MIC) ENGINE ---
         let recognition = null;
         let isListening = false;
 
@@ -713,23 +811,43 @@ def chat():
     
     try:
         if image_b64 and groq_client:
-            completion = groq_client.chat.completions.create(
-                model="llama-3.2-90b-vision-preview",  # Updated active Groq vision model ID
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_message},
+            # Multi-model vision fallback list
+            vision_models = [
+                "llama-3.2-11b-vision-instruct",
+                "llama-3.2-90b-vision-instruct",
+                "meta-llama/llama-3.2-11b-vision-instruct"
+            ]
+            
+            completion = None
+            last_error = None
+            
+            for v_model in vision_models:
+                try:
+                    completion = groq_client.chat.completions.create(
+                        model=v_model,
+                        messages=[
                             {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": user_message},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+                                    }
+                                ]
                             }
-                        ]
-                    }
-                ],
-                temperature=0.2,
-                max_tokens=500
-            )
+                        ],
+                        temperature=0.2,
+                        max_tokens=500
+                    )
+                    break
+                except Exception as ve:
+                    last_error = ve
+                    continue
+            
+            if not completion:
+                raise Exception(f"Vision API Error: {str(last_error)}")
+
             ai_response = completion.choices[0].message.content
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
