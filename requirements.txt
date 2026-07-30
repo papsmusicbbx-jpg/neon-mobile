@@ -7,6 +7,6 @@ langchain-community
 ddgs
 duckduckgo-search
 elevenlabs
-pinecone
+pinecone-client
 langchain-pinecone
 requests

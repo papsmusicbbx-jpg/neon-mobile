@@ -27,7 +27,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
 PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 
-VOICE_ID = "nPczCjzI2devNBz1zQrb"  # Rachel
+VOICE_ID = "nPczCjzI2devNBz1zQrb"
 INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
@@ -44,7 +44,6 @@ class ServerlessEmbeddings(Embeddings):
         if hf_token:
             headers["Authorization"] = f"Bearer {hf_token}"
 
-        # Official updated Hugging Face router endpoint
         url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
         response = requests.post(
             url, 
@@ -108,103 +107,320 @@ chat_history = []
 # ==========================================
 app = Flask(__name__)
 
+# --- INJECTED MOBILE ARM-DECK UI ---
 MOBILE_HTML = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>N.E.O.N. Mobile</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>N.E.O.N. Mobile HUD</title>
     <style>
+        :root {
+            --main: #f472b6;
+            --accent: #db2777;
+            --dark: #be185d;
+            --bg: #3b0724;
+            --bg-dark: #09090b;
+            --text-bright: #fbcfe8;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: 'Courier New', Courier, monospace; }
+        
         body {
-            background-color: #09090b;
-            color: #e2e8f0;
-            font-family: 'Courier New', Courier, monospace;
-            margin: 0;
-            padding: 0;
+            background-color: var(--bg-dark);
+            color: var(--text-bright);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* --- MAIN LAYOUT --- */
+        #app-container {
+            display: flex;
+            width: 200vw; 
+            height: 100vh;
+            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .screen {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            padding: 10px;
+        }
+
+        /* --- SCREEN 1: TERMINAL & CHAT --- */
+        #screen-chat { flex-direction: row; }
+        
+        #avatar-panel {
+            width: 30%;
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            align-items: center;
+            justify-content: center;
+            border-right: 2px solid var(--bg);
         }
-        #header {
-            background-color: #14060d;
-            color: #f472b6;
+
+        #terminal-panel {
+            width: 70%;
+            display: flex;
+            flex-direction: column;
+            padding-left: 10px;
+        }
+
+        #chat-box {
+            flex-grow: 1;
+            background: #050505;
+            border: 1px solid var(--bg);
+            color: #e2e8f0;
+            padding: 10px;
+            overflow-y: auto;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .mic-btn {
+            background: var(--bg);
+            color: var(--main);
+            border: 2px solid var(--accent);
             padding: 15px;
             text-align: center;
             font-weight: bold;
-            border-bottom: 2px solid #db2777;
-            box-shadow: 0 4px 10px rgba(219, 39, 119, 0.2);
+            font-size: 18px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px var(--dark);
         }
-        #chatbox {
+
+        /* --- SCREEN 2: QUICK COMMANDS --- */
+        #screen-commands { flex-direction: column; }
+        
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
             flex-grow: 1;
-            padding: 15px;
             overflow-y: auto;
+            padding-bottom: 10px;
+        }
+
+        .cmd-btn {
+            background: #14060d;
+            border: 1px solid var(--accent);
+            color: var(--main);
+            padding: 15px 5px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .cmd-btn:active { background: var(--accent); color: #fff; }
+
+        .big-kb-trigger {
+            background: var(--accent);
+            color: #fff;
+            grid-column: span 3;
+            font-size: 16px;
+        }
+
+        /* --- BIG TACTICAL KEYBOARD OVERLAY --- */
+        #keyboard-overlay {
+            position: fixed;
+            top: 100vh;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: var(--bg-dark);
+            z-index: 100;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-        }
-        .msg { padding: 10px 14px; border-radius: 8px; max-width: 85%; word-wrap: break-word; }
-        .user-msg { background-color: #3b0724; color: #fbcfe8; align-self: flex-end; border: 1px solid #be185d; }
-        .ai-msg { background-color: #050505; color: #e2e8f0; align-self: flex-start; border: 1px solid #3b0724; }
-        #input-area {
-            display: flex;
             padding: 10px;
-            background-color: #14060d;
-            border-top: 1px solid #3b0724;
+            transition: top 0.2s ease-out;
         }
-        #user-input {
+
+        #kb-input-display {
+            background: #000;
+            color: var(--main);
+            border: 2px solid var(--accent);
+            height: 60px;
+            font-size: 20px;
+            padding: 10px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        #kb-grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 5px;
             flex-grow: 1;
-            background-color: #050505;
-            color: #f8fafc;
-            border: 1px solid #be185d;
-            padding: 12px;
-            border-radius: 4px;
-            font-family: 'Courier New', Courier, monospace;
         }
-        #user-input:focus { outline: none; border-color: #f472b6; }
-        #send-btn {
-            background-color: #db2777;
-            color: white;
-            border: none;
-            padding: 0 20px;
-            margin-left: 10px;
-            border-radius: 4px;
+
+        .kb-key {
+            background: #14060d;
+            border: 1px solid var(--bg);
+            color: var(--text-bright);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
             font-weight: bold;
-            font-family: 'Courier New', Courier, monospace;
+            border-radius: 4px;
         }
-        #send-btn:active { background-color: #be185d; }
-        .typing { color: #f472b6; font-style: italic; font-size: 0.9em; align-self: flex-start; display: none; padding: 0 15px 5px;}
+        .kb-key:active { background: var(--accent); }
+        
+        .kb-wide { grid-column: span 2; }
+        .kb-space { grid-column: span 4; }
+        .kb-exec { grid-column: span 3; background: var(--accent); color: white; }
+        .kb-close { grid-column: span 2; background: #450a0a; border-color: #dc2626; color: #fecaca;}
+
     </style>
 </head>
 <body>
-    <div id="header">⚡ N.E.O.N. // GLOBAL LINK</div>
-    <div id="chatbox">
-        <div class="msg ai-msg">Global link established. N.E.O.N. online. Shared memory active.</div>
+
+    <div id="app-container">
+        
+        <!-- SCREEN 1: TERMINAL -->
+        <div id="screen-chat" class="screen">
+            <div id="avatar-panel">
+                <div style="color: var(--main); font-weight: bold; margin-bottom: 10px;">⚡ N.E.O.N.</div>
+                <div style="width: 80px; height: 80px; border-radius: 50%; border: 3px solid var(--accent); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 15px var(--accent);">
+                    <div style="width: 40px; height: 40px; background: var(--text-bright); border-radius: 50%;"></div>
+                </div>
+                <div style="margin-top: 20px; font-size: 10px; color: var(--main); text-align: center;">SWIPE RIGHT ➔<br>FOR COMMANDS</div>
+            </div>
+            <div id="terminal-panel">
+                <div id="chat-box">
+                    <span style="color: var(--main);">> Global link established.</span><br>
+                    <span style="color: var(--main);">> N.E.O.N. online.</span><br>
+                </div>
+                <!-- Mic logic will be added here later -->
+                <div class="mic-btn" onclick="toggleMic()">HOLD TO SPEAK</div>
+            </div>
+        </div>
+
+        <!-- SCREEN 2: QUICK COMMANDS -->
+        <div id="screen-commands" class="screen">
+            <div style="color: var(--main); font-weight: bold; margin-bottom: 10px;">
+                <span style="float: left;">← SWIPE LEFT</span> 
+                QUICK MACROS 
+            </div>
+            
+            <div class="grid-container">
+                <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ ⌨️ OPEN BIG KEYBOARD ]</div>
+                
+                <!-- System & Macro Examples (can be edited later) -->
+                <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
+                <div class="cmd-btn" onclick="sendMacro('What is my current location?')">📍 Location</div>
+                <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
+                
+                <div class="cmd-btn" onclick="sendMacro('Search the web for the latest tech news.')">🌐 News</div>
+                <div class="cmd-btn" onclick="sendMacro('Clear current working context.')">🧹 Clear</div>
+                <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
+            </div>
+        </div>
+
     </div>
-    <div id="typing-indicator" class="typing">N.E.O.N. is processing...</div>
-    <div id="input-area">
-        <input type="text" id="user-input" placeholder="Enter command..." onkeypress="handleKeyPress(event)">
-        <button id="send-btn" onclick="sendMessage()">EXEC</button>
+
+    <!-- TACTICAL KEYBOARD OVERLAY -->
+    <div id="keyboard-overlay">
+        <div id="kb-input-display"><span id="kb-text">_</span></div>
+        <div id="kb-grid">
+            <!-- Row 1 -->
+            <div class="kb-key" onclick="typeChar('Q')">Q</div><div class="kb-key" onclick="typeChar('W')">W</div><div class="kb-key" onclick="typeChar('E')">E</div><div class="kb-key" onclick="typeChar('R')">R</div><div class="kb-key" onclick="typeChar('T')">T</div><div class="kb-key" onclick="typeChar('Y')">Y</div><div class="kb-key" onclick="typeChar('U')">U</div><div class="kb-key" onclick="typeChar('I')">I</div><div class="kb-key" onclick="typeChar('O')">O</div><div class="kb-key" onclick="typeChar('P')">P</div>
+            <!-- Row 2 -->
+            <div class="kb-key" onclick="typeChar('A')">A</div><div class="kb-key" onclick="typeChar('S')">S</div><div class="kb-key" onclick="typeChar('D')">D</div><div class="kb-key" onclick="typeChar('F')">F</div><div class="kb-key" onclick="typeChar('G')">G</div><div class="kb-key" onclick="typeChar('H')">H</div><div class="kb-key" onclick="typeChar('J')">J</div><div class="kb-key" onclick="typeChar('K')">K</div><div class="kb-key" onclick="typeChar('L')">L</div><div class="kb-key kb-wide" onclick="backspace()">⌫</div>
+            <!-- Row 3 -->
+            <div class="kb-key" onclick="typeChar('Z')">Z</div><div class="kb-key" onclick="typeChar('X')">X</div><div class="kb-key" onclick="typeChar('C')">C</div><div class="kb-key" onclick="typeChar('V')">V</div><div class="kb-key" onclick="typeChar('B')">B</div><div class="kb-key" onclick="typeChar('N')">N</div><div class="kb-key" onclick="typeChar('M')">M</div><div class="kb-key" onclick="typeChar('?')">?</div><div class="kb-key" onclick="typeChar('/')">/</div>
+            <!-- Row 4 -->
+            <div class="kb-key kb-close" onclick="closeKeyboard()">CLOSE</div>
+            <div class="kb-key" onclick="typeChar('.')">.</div>
+            <div class="kb-key kb-space" onclick="typeChar(' ')">SPACE</div>
+            <div class="kb-key kb-exec" onclick="executeKeyboard()">⚡ EXECUTE</div>
+        </div>
     </div>
 
     <script>
-        const chatbox = document.getElementById('chatbox');
-        const input = document.getElementById('user-input');
-        const typingIndicator = document.getElementById('typing-indicator');
+        // --- SWIPE LOGIC ---
+        let touchstartX = 0;
+        let touchendX = 0;
+        let currentScreen = 0; // 0 = Chat, 1 = Commands
+        const appContainer = document.getElementById('app-container');
 
-        function handleKeyPress(e) {
-            if (e.key === 'Enter') sendMessage();
+        function handleSwipe() {
+            if (touchendX < touchstartX - 50) {
+                // Swipe Left -> Show Commands
+                currentScreen = 1;
+                appContainer.style.transform = 'translateX(-100vw)';
+            }
+            if (touchendX > touchstartX + 50) {
+                // Swipe Right -> Show Chat
+                currentScreen = 0;
+                appContainer.style.transform = 'translateX(0)';
+            }
         }
 
-        async function sendMessage() {
-            const text = input.value.trim();
-            if (!text) return;
+        document.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; });
+        document.addEventListener('touchend', e => { touchendX = e.changedTouches[0].screenX; handleSwipe(); });
 
-            chatbox.innerHTML += `<div class="msg user-msg">${text}</div>`;
-            input.value = '';
-            chatbox.scrollTop = chatbox.scrollHeight;
-            typingIndicator.style.display = 'block';
+        // --- KEYBOARD LOGIC ---
+        let kbString = "";
+        const kbDisplay = document.getElementById('kb-text');
+        const kbOverlay = document.getElementById('keyboard-overlay');
+        const chatBox = document.getElementById('chat-box');
+
+        function openKeyboard() { kbOverlay.style.top = '0'; }
+        function closeKeyboard() { kbOverlay.style.top = '100vh'; }
+        
+        function typeChar(char) {
+            if(kbString.length < 80) { kbString += char; updateKbDisplay(); }
+        }
+        function backspace() {
+            kbString = kbString.slice(0, -1);
+            updateKbDisplay();
+        }
+        function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
+        
+        // --- MACRO BUTTON LOGIC ---
+        function sendMacro(text) {
+            kbString = text;
+            executeKeyboard();
+        }
+
+        // --- MAIN CHAT LOGIC ---
+        async function executeKeyboard() {
+            const text = kbString.trim();
+            if(text === "") {
+                closeKeyboard();
+                return;
+            }
+
+            // Show user message in terminal
+            chatBox.innerHTML += `<br>> <b>User:</b> ${text}`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            // Generate thinking indicator ID
+            const thinkingId = "think-" + Date.now();
+            chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            // Clean up UI instantly
+            kbString = "";
+            updateKbDisplay();
+            closeKeyboard();
+            currentScreen = 0;
+            appContainer.style.transform = 'translateX(0)'; // Swipe back to main screen
 
             try {
+                // Send securely to your existing Python backend route
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -212,18 +428,29 @@ MOBILE_HTML = """
                 });
                 const data = await response.json();
                 
-                typingIndicator.style.display = 'none';
-                chatbox.innerHTML += `<div class="msg ai-msg">${data.response}</div>`;
-                chatbox.scrollTop = chatbox.scrollHeight;
+                // Remove thinking text
+                const thnkEl = document.getElementById(thinkingId);
+                if(thnkEl) thnkEl.remove();
+                
+                // Print N.E.O.N. response
+                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
+                chatBox.scrollTop = chatBox.scrollHeight;
 
+                // Play Audio Response
                 if (data.audio_url) {
                     const audio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    audio.play().catch(e => console.log("Audio autoplay blocked:", e));
+                    audio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
                 }
             } catch (error) {
-                typingIndicator.style.display = 'none';
-                chatbox.innerHTML += `<div class="msg ai-msg" style="color:red;">Error connecting to host.</div>`;
+                const thnkEl = document.getElementById(thinkingId);
+                if(thnkEl) thnkEl.remove();
+                chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
             }
+        }
+
+        function toggleMic() {
+            chatBox.innerHTML += "<br>> <span style='color: var(--accent)'>[Mic Input System Offline - Awaiting Integration]</span>";
+            chatBox.scrollTop = chatBox.scrollHeight;
         }
     </script>
 </body>
