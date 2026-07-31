@@ -343,6 +343,39 @@ MOBILE_HTML = """
             background: #230816;
         }
 
+        /* CYBERPUNK HUD TOAST NOTIFICATION */
+        #hud-toast {
+            position: fixed;
+            top: -100px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(9, 9, 11, 0.95);
+            border: 2px solid var(--accent);
+            box-shadow: 0 0 20px var(--accent);
+            color: var(--text-bright);
+            padding: 12px;
+            border-radius: 6px;
+            z-index: 9999;
+            transition: top 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-family: 'Courier New', Courier, monospace;
+        }
+        #hud-toast.show {
+            top: 15px;
+        }
+        .toast-title {
+            font-size: 10px;
+            color: var(--main);
+            font-weight: bold;
+            margin-bottom: 4px;
+            letter-spacing: 1px;
+        }
+        .toast-body {
+            font-size: 12px;
+            color: #e2e8f0;
+        }
+
         #keyboard-overlay {
             position: fixed;
             top: 100vh;
@@ -402,6 +435,12 @@ MOBILE_HTML = """
 </head>
 <body>
 
+    <!-- HUD TOAST CONTAINER -->
+    <div id="hud-toast">
+        <div class="toast-title">⚡ N.E.O.N. // SYSTEM ALERT</div>
+        <div class="toast-body" id="toast-text-el">Neural notification link established.</div>
+    </div>
+
     <!-- HIDDEN CAMERA INPUT -->
     <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none;" onchange="handleCameraCapture(event)">
 
@@ -422,7 +461,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 4.3<br>
+                        SYS.VER: 4.4<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -458,7 +497,7 @@ MOBILE_HTML = """
                     <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
                     <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
 
-                    <div class="cmd-btn" onclick="requestNotificationPermission()">🔔 Notify</div>
+                    <div class="cmd-btn" onclick="triggerHudNotification('Neural link verified. HUD alert active.')">🔔 Notify</div>
                     <div class="cmd-btn" onclick="openMacroBuilder()" style="background: var(--bg); color: #fff;">➕ Add Macro</div>
                 </div>
             </div>
@@ -485,6 +524,7 @@ MOBILE_HTML = """
         let touchendX = 0;
         let currentScreen = 0;
         let isMuted = false;
+        let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
         function goToScreen(screenIndex) {
@@ -536,6 +576,20 @@ MOBILE_HTML = """
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
 
+        // --- CYBERPUNK HUD NOTIFICATION TOAST ---
+        function triggerHudNotification(message) {
+            const toast = document.getElementById('hud-toast');
+            const textEl = document.getElementById('toast-text-el');
+            textEl.innerText = message;
+            
+            toast.classList.add('show');
+            if (toastTimeout) clearTimeout(toastTimeout);
+            
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 4000);
+        }
+
         // --- MUTE / UNMUTE TOGGLE LOGIC ---
         function toggleMute() {
             isMuted = !isMuted;
@@ -547,9 +601,11 @@ MOBILE_HTML = """
                     currentAudio.pause();
                     currentAudio.currentTime = 0;
                 }
+                triggerHudNotification("N.E.O.N. audio muted.");
             } else {
                 muteBtn.innerText = "🔇 Mute";
                 muteBtn.style.background = "#14060d";
+                triggerHudNotification("N.E.O.N. audio restored.");
             }
         }
 
@@ -590,25 +646,7 @@ MOBILE_HTML = """
             btn.innerText = name;
             btn.onclick = () => sendMacro(promptText);
             container.appendChild(btn);
-            alert("Custom macro saved successfully!");
-        }
-
-        // --- PUSH NOTIFICATIONS LOGIC ---
-        function requestNotificationPermission() {
-            if (!("Notification" in window)) {
-                alert("This browser does not support notifications.");
-                return;
-            }
-            Notification.requestPermission().then(permission => {
-                if (permission === "granted") {
-                    new Notification("N.E.O.N. // Core", {
-                        body: "Neural push notification link established successfully.",
-                        icon: "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>"
-                    });
-                } else {
-                    alert("Notification permission denied.");
-                }
-            });
+            triggerHudNotification(`Macro '${name}' successfully compiled.`);
         }
 
         window.addEventListener('DOMContentLoaded', () => {
