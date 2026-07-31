@@ -156,6 +156,18 @@ MOBILE_HTML = """
             overscroll-behavior: none;
         }
 
+        /* CRT SCANLINE OVERLAY */
+        body::after {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 4px;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0.5;
+        }
+
         #viewport-wrapper {
             position: relative;
             width: 100vw;
@@ -357,7 +369,7 @@ MOBILE_HTML = """
             color: var(--text-bright);
             padding: 12px;
             border-radius: 6px;
-            z-index: 9999;
+            z-index: 10000;
             transition: top 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             font-family: 'Courier New', Courier, monospace;
         }
@@ -461,7 +473,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 4.4<br>
+                        SYS.VER: 4.5<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -520,10 +532,94 @@ MOBILE_HTML = """
     </div>
 
     <script>
+        // --- WEB AUDIO API ENGINE ---
+        let audioCtx = null;
+        let humOsc = null;
+        let humGain = null;
+        let isMuted = false;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            if (!humOsc) {
+                // Background Engine Hum
+                humOsc = audioCtx.createOscillator();
+                humOsc.type = 'triangle';
+                humOsc.frequency.setValueAtTime(55, audioCtx.currentTime); 
+                
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 300;
+
+                humGain = audioCtx.createGain();
+                humGain.gain.setValueAtTime(isMuted ? 0 : 0.03, audioCtx.currentTime); 
+                
+                humOsc.connect(filter);
+                filter.connect(humGain);
+                humGain.connect(audioCtx.destination);
+                humOsc.start();
+                
+                playBootSound();
+            }
+        }
+
+        function playBeep() {
+            if(!audioCtx || audioCtx.state === 'suspended' || isMuted) return;
+            const osc = audioCtx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.05);
+            
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.05);
+        }
+
+        function playBootSound() {
+            if(isMuted) return;
+            const osc = audioCtx.createOscillator();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.4);
+            
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(200, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(2000, audioCtx.currentTime + 0.4);
+            
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+            
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.4);
+        }
+
+        // Global listener to initialize audio and trigger click SFX
+        document.addEventListener('click', (e) => {
+            initAudio(); // Browsers require user interaction to unlock audio
+            if(e.target.closest('.cmd-btn') || e.target.closest('.kb-key') || e.target.closest('.mic-btn')) {
+                playBeep();
+            }
+        });
+
         let touchstartX = 0;
         let touchendX = 0;
         let currentScreen = 0;
-        let isMuted = false;
         let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -601,10 +697,16 @@ MOBILE_HTML = """
                     currentAudio.pause();
                     currentAudio.currentTime = 0;
                 }
+                if (humGain && audioCtx) {
+                    humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+                }
                 triggerHudNotification("N.E.O.N. audio muted.");
             } else {
                 muteBtn.innerText = "🔇 Mute";
                 muteBtn.style.background = "#14060d";
+                if (humGain && audioCtx) {
+                    humGain.gain.setTargetAtTime(0.03, audioCtx.currentTime, 0.1);
+                }
                 triggerHudNotification("N.E.O.N. audio restored.");
             }
         }
