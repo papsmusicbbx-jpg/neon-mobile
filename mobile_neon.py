@@ -38,49 +38,22 @@ eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY els
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
 
-# Serverless Embedding Class
 class ServerlessEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self.embed_query(t) for t in texts]
 
     def embed_query(self, text: str) -> list[float]:
         hf_token = os.environ.get("HF_TOKEN", "")
-        headers = {}
-        if hf_token:
-            headers["Authorization"] = f"Bearer {hf_token}"
-
+        headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
         url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
-        response = requests.post(
-            url, 
-            headers=headers, 
-            json={"inputs": text, "options": {"wait_for_model": True}},
-            timeout=15
-        )
-
-        if response.status_code != 200:
-            raise Exception(f"HF API {response.status_code}: {response.text[:100]}")
-
-        try:
-            res = response.json()
-        except Exception:
-            raise Exception(f"Invalid response from HF API: {response.text[:100]}")
-
-        if isinstance(res, list):
-            if len(res) > 0 and isinstance(res[0], list):
-                return res[0]
-            return res
-        elif isinstance(res, dict) and "error" in res:
-            raise Exception(f"HF Model Error: {res['error']}")
-        
-        raise Exception(f"Unexpected HF response format: {res}")
+        response = requests.post(url, headers=headers, json={"inputs": text, "options": {"wait_for_model": True}}, timeout=15)
+        if response.status_code != 200: raise Exception(f"HF API {response.status_code}")
+        res = response.json()
+        if isinstance(res, list) and len(res) > 0 and isinstance(res[0], list): return res[0]
+        return res
 
 embeddings = ServerlessEmbeddings()
-
-vector_store = PineconeVectorStore(
-    index_name=INDEX_NAME, 
-    embedding=embeddings, 
-    pinecone_api_key=PINECONE_API_KEY
-)
+vector_store = PineconeVectorStore(index_name=INDEX_NAME, embedding=embeddings, pinecone_api_key=PINECONE_API_KEY)
 
 @tool
 def remember_fact(fact: str) -> str:
@@ -96,20 +69,11 @@ def recall_fact(query: str) -> str:
     return "\n".join([f"- {res.page_content}" for res in results])
 
 tools = [DuckDuckGoSearchResults(), remember_fact, recall_fact] 
-
 current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
-system_prompt = (
-    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile device. "
-    f"Today's date is {current_date}. "
-    f"Keep your answers concise, intelligent, and optimized for reading on a small phone screen."
-)
-
+system_prompt = f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile device. Today's date is {current_date}. Keep your answers concise, intelligent, and optimized for reading on a small phone screen."
 agent_executor = create_react_agent(llm, tools, prompt=system_prompt)
 chat_history = []
 
-# ==========================================
-# FLASK WEB SERVER SETUP
-# ==========================================
 app = Flask(__name__)
 
 MOBILE_HTML = """
@@ -120,9 +84,7 @@ MOBILE_HTML = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="theme-color" content="#09090b">
-    <link rel="manifest" href='data:application/json,{"name":"N.E.O.N. HUD","short_name":"NEON","start_url":"/","display":"standalone","orientation":"landscape","background_color":"#09090b","theme_color":"#09090b"}'>
+    <meta name="theme-color" content="#050204">
     <title>N.E.O.N. Mobile HUD</title>
     <style>
         :root {
@@ -134,27 +96,8 @@ MOBILE_HTML = """
             --text-bright: #fbcfe8;
         }
         
-        * { 
-            box-sizing: border-box; 
-            margin: 0; 
-            padding: 0; 
-            user-select: none; 
-            -webkit-user-select: none;
-            font-family: 'Courier New', Courier, monospace; 
-        }
-        
-        html, body {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background-color: var(--bg-dark);
-            color: var(--text-bright);
-            touch-action: none;
-            overscroll-behavior: none;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: 'Courier New', Courier, monospace; touch-action: none; overscroll-behavior: none;}
+        html, body { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: var(--bg-dark); color: var(--text-bright); }
 
         /* CRT SCANLINE OVERLAY */
         body::after {
@@ -163,325 +106,123 @@ MOBILE_HTML = """
             top: 0; left: 0; width: 100vw; height: 100vh;
             background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
             background-size: 100% 4px;
-            z-index: 9999;
+            z-index: 9000;
             pointer-events: none;
             opacity: 0.5;
         }
 
-        #viewport-wrapper {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-        }
-
-        #app-container {
+        /* BOOT SCREEN */
+        #boot-screen {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #050204;
+            background-image: radial-gradient(circle at center, #1a0510 0%, #050204 100%),
+                              linear-gradient(rgba(244, 114, 182, 0.03) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(244, 114, 182, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 20px 20px, 20px 20px;
+            z-index: 99999;
             display: flex;
-            width: 200vw; 
-            height: 100vh;
-            position: absolute;
-            top: 0;
-            left: 0;
-            transform: translateX(0vw);
-            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-            will-change: transform;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.8s ease-out;
         }
-
-        .screen {
-            width: 100vw;
-            height: 100vh;
-            flex-shrink: 0;
-            display: flex;
-            padding: 8px;
-            box-sizing: border-box;
-            overflow: hidden;
+        .boot-logo {
+            font-size: 48px;
+            font-weight: bold;
+            color: var(--text-bright);
+            text-shadow: 0 0 10px var(--main), 0 0 20px var(--main);
+            animation: bootPulse 3s infinite alternate ease-in-out;
+            letter-spacing: 8px;
+            margin-bottom: 20px;
         }
+        .boot-subtext {
+            font-size: 12px;
+            color: var(--main);
+            opacity: 0.7;
+            letter-spacing: 2px;
+            animation: blink 1.5s infinite;
+        }
+        @keyframes bootPulse {
+            0% { opacity: 0.4; text-shadow: 0 0 5px var(--accent); }
+            100% { opacity: 1; text-shadow: 0 0 20px var(--main), 0 0 40px var(--accent); }
+        }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
+        /* HUD LAYOUT */
+        #viewport-wrapper { position: relative; width: 100vw; height: 100vh; overflow: hidden; opacity: 0; transition: opacity 0.8s ease-in; }
+        #app-container { display: flex; width: 200vw; height: 100vh; position: absolute; top: 0; left: 0; transform: translateX(0vw); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); will-change: transform; }
+        .screen { width: 100vw; height: 100vh; flex-shrink: 0; display: flex; padding: 8px; box-sizing: border-box; overflow: hidden; }
         #screen-chat { flex-direction: row; }
         
         #avatar-panel {
-            width: 32%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: space-between;
-            border-right: 2px solid var(--bg);
-            padding: 10px 5px;
-            background: linear-gradient(180deg, rgba(20,6,13,0.6) 0%, rgba(9,9,11,0.9) 100%);
+            width: 32%; display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+            border-right: 2px solid var(--bg); padding: 10px 5px; background: linear-gradient(180deg, rgba(20,6,13,0.6) 0%, rgba(9,9,11,0.9) 100%);
         }
+        .avatar-wrapper { position: relative; width: 85px; height: 85px; display: flex; align-items: center; justify-content: center; margin: 10px 0; }
+        .outer-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px dashed var(--accent); animation: rotateRing 14s linear infinite; opacity: 0.85; }
+        .pulse-ring { position: absolute; width: 82%; height: 82%; border-radius: 50%; border: 2px solid var(--main); box-shadow: 0 0 15px var(--accent), inset 0 0 10px var(--accent); animation: pulseGlow 2.5s ease-in-out infinite alternate; }
+        .inner-core { width: 34px; height: 34px; background: var(--text-bright); border-radius: 50%; box-shadow: 0 0 18px #fff, 0 0 30px var(--main); animation: coreBeat 1.8s ease-in-out infinite alternate; }
+        @keyframes rotateRing { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulseGlow { 0% { transform: scale(0.96); box-shadow: 0 0 10px var(--accent), inset 0 0 5px var(--accent); } 100% { transform: scale(1.04); box-shadow: 0 0 22px var(--main), inset 0 0 14px var(--main); } }
+        @keyframes coreBeat { 0% { transform: scale(0.88); opacity: 0.85; } 100% { transform: scale(1.12); opacity: 1; } }
 
-        .avatar-wrapper {
-            position: relative;
-            width: 85px;
-            height: 85px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 10px 0;
-        }
-
-        .outer-ring {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            border: 2px dashed var(--accent);
-            animation: rotateRing 14s linear infinite;
-            opacity: 0.85;
-        }
-
-        .pulse-ring {
-            position: absolute;
-            width: 82%;
-            height: 82%;
-            border-radius: 50%;
-            border: 2px solid var(--main);
-            box-shadow: 0 0 15px var(--accent), inset 0 0 10px var(--accent);
-            animation: pulseGlow 2.5s ease-in-out infinite alternate;
-        }
-
-        .inner-core {
-            width: 34px;
-            height: 34px;
-            background: var(--text-bright);
-            border-radius: 50%;
-            box-shadow: 0 0 18px #fff, 0 0 30px var(--main);
-            animation: coreBeat 1.8s ease-in-out infinite alternate;
-        }
-
-        @keyframes rotateRing {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-
-        @keyframes pulseGlow {
-            0% { transform: scale(0.96); box-shadow: 0 0 10px var(--accent), inset 0 0 5px var(--accent); }
-            100% { transform: scale(1.04); box-shadow: 0 0 22px var(--main), inset 0 0 14px var(--main); }
-        }
-
-        @keyframes coreBeat {
-            0% { transform: scale(0.88); opacity: 0.85; }
-            100% { transform: scale(1.12); opacity: 1; }
-        }
-
-        .hud-stat-box {
-            width: 100%;
-            background: #050505;
-            border: 1px solid var(--bg);
-            border-radius: 4px;
-            padding: 6px;
-            font-size: 9px;
-            color: var(--main);
-            line-height: 1.4;
-        }
-
-        #terminal-panel {
-            width: 68%;
-            display: flex;
-            flex-direction: column;
-            padding-left: 8px;
-        }
-
-        #chat-box {
-            flex-grow: 1;
-            background: #050505;
-            border: 1px solid var(--bg);
-            color: #e2e8f0;
-            padding: 10px;
-            overflow-y: auto;
-            font-size: 13px;
-            margin-bottom: 8px;
-            touch-action: pan-y;
-            border-radius: 4px;
-        }
-
-        .mic-btn {
-            background: var(--bg);
-            color: var(--main);
-            border: 2px solid var(--accent);
-            padding: 12px;
-            text-align: center;
-            font-weight: bold;
-            font-size: 15px;
-            border-radius: 6px;
-            box-shadow: 0 0 10px var(--dark);
-            transition: all 0.2s ease;
-            flex-shrink: 0;
-        }
-        .mic-btn:active {
-            transform: scale(0.98);
-        }
+        .hud-stat-box { width: 100%; background: #050505; border: 1px solid var(--bg); border-radius: 4px; padding: 6px; font-size: 9px; color: var(--main); line-height: 1.4; }
+        #terminal-panel { width: 68%; display: flex; flex-direction: column; padding-left: 8px; }
+        #chat-box { flex-grow: 1; background: #050505; border: 1px solid var(--bg); color: #e2e8f0; padding: 10px; overflow-y: auto; font-size: 13px; margin-bottom: 8px; touch-action: pan-y; border-radius: 4px; }
+        
+        .mic-btn { background: var(--bg); color: var(--main); border: 2px solid var(--accent); padding: 12px; text-align: center; font-weight: bold; font-size: 15px; border-radius: 6px; box-shadow: 0 0 10px var(--dark); transition: all 0.2s ease; flex-shrink: 0; }
+        .mic-btn:active { transform: scale(0.98); }
 
         #screen-commands { flex-direction: column; }
-        
-        .grid-container {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            grid-auto-rows: minmax(45px, auto);
-            gap: 6px;
-            flex-grow: 1;
-            overflow-y: auto;
-            padding-bottom: 5px;
-            touch-action: pan-y;
-        }
-
-        .cmd-btn {
-            background: #14060d;
-            border: 1px solid var(--accent);
-            color: var(--main);
-            padding: 8px 4px;
-            font-size: 11px;
-            font-weight: bold;
-            text-align: center;
-            border-radius: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.15s ease;
-            cursor: pointer;
-        }
+        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(45px, auto); gap: 6px; flex-grow: 1; overflow-y: auto; padding-bottom: 5px; touch-action: pan-y; }
+        .cmd-btn { background: #14060d; border: 1px solid var(--accent); color: var(--main); padding: 8px 4px; font-size: 11px; font-weight: bold; text-align: center; border-radius: 5px; display: flex; align-items: center; justify-content: center; transition: background 0.15s ease; cursor: pointer; }
         .cmd-btn:active { background: var(--accent); color: #fff; }
+        .big-kb-trigger { background: var(--accent); color: #fff; grid-column: span 3; font-size: 13px; padding: 10px; }
+        .custom-macro-btn { border-color: #f472b6; background: #230816; }
 
-        .big-kb-trigger {
-            background: var(--accent);
-            color: #fff;
-            grid-column: span 3;
-            font-size: 13px;
-            padding: 10px;
-        }
+        /* TOAST NOTIFICATION */
+        #hud-toast { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; background: rgba(9, 9, 11, 0.95); border: 2px solid var(--accent); box-shadow: 0 0 20px var(--accent); color: var(--text-bright); padding: 12px; border-radius: 6px; z-index: 10000; transition: top 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        #hud-toast.show { top: 15px; }
+        .toast-title { font-size: 10px; color: var(--main); font-weight: bold; margin-bottom: 4px; letter-spacing: 1px; }
+        .toast-body { font-size: 12px; color: #e2e8f0; }
 
-        .custom-macro-btn {
-            border-color: #f472b6;
-            background: #230816;
-        }
-
-        /* CYBERPUNK HUD TOAST NOTIFICATION */
-        #hud-toast {
-            position: fixed;
-            top: -100px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 90%;
-            max-width: 400px;
-            background: rgba(9, 9, 11, 0.95);
-            border: 2px solid var(--accent);
-            box-shadow: 0 0 20px var(--accent);
-            color: var(--text-bright);
-            padding: 12px;
-            border-radius: 6px;
-            z-index: 10000;
-            transition: top 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            font-family: 'Courier New', Courier, monospace;
-        }
-        #hud-toast.show {
-            top: 15px;
-        }
-        .toast-title {
-            font-size: 10px;
-            color: var(--main);
-            font-weight: bold;
-            margin-bottom: 4px;
-            letter-spacing: 1px;
-        }
-        .toast-body {
-            font-size: 12px;
-            color: #e2e8f0;
-        }
-
-        #keyboard-overlay {
-            position: fixed;
-            top: 100vh;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: var(--bg-dark);
-            z-index: 999;
-            display: flex;
-            flex-direction: column;
-            padding: 8px;
-            transition: top 0.25s ease-out;
-            box-sizing: border-box;
-        }
-
-        #kb-input-display {
-            background: #000;
-            color: var(--main);
-            border: 2px solid var(--accent);
-            height: 48px;
-            font-size: 18px;
-            padding: 10px;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            overflow: hidden;
-            flex-shrink: 0;
-            border-radius: 4px;
-        }
-
-        #kb-grid {
-            display: grid;
-            grid-template-columns: repeat(10, 1fr);
-            gap: 4px;
-            flex-grow: 1;
-        }
-
-        .kb-key {
-            background: #14060d;
-            border: 1px solid var(--bg);
-            color: var(--text-bright);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            font-weight: bold;
-            border-radius: 4px;
-        }
+        /* KEYBOARD */
+        #keyboard-overlay { position: fixed; top: 100vh; left: 0; width: 100vw; height: 100vh; background: var(--bg-dark); z-index: 999; display: flex; flex-direction: column; padding: 8px; transition: top 0.25s ease-out; box-sizing: border-box; }
+        #kb-input-display { background: #000; color: var(--main); border: 2px solid var(--accent); height: 48px; font-size: 18px; padding: 10px; margin-bottom: 6px; display: flex; align-items: center; overflow: hidden; flex-shrink: 0; border-radius: 4px; }
+        #kb-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; flex-grow: 1; }
+        .kb-key { background: #14060d; border: 1px solid var(--bg); color: var(--text-bright); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border-radius: 4px; }
         .kb-key:active { background: var(--accent); }
-        
         .kb-wide { grid-column: span 2; }
         .kb-space { grid-column: span 4; }
         .kb-exec { grid-column: span 3; background: var(--accent); color: white; }
         .kb-close { grid-column: span 2; background: #450a0a; border-color: #dc2626; color: #fecaca;}
-
     </style>
 </head>
 <body>
 
-    <!-- HUD TOAST CONTAINER -->
+    <!-- BOOT SCREEN -->
+    <div id="boot-screen">
+        <div class="boot-logo">N.E.O.N.</div>
+        <div class="boot-subtext">DOUBLE TAP TO INITIALIZE</div>
+    </div>
+
     <div id="hud-toast">
         <div class="toast-title">⚡ N.E.O.N. // SYSTEM ALERT</div>
         <div class="toast-body" id="toast-text-el">Neural notification link established.</div>
     </div>
 
-    <!-- HIDDEN CAMERA INPUT -->
     <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none;" onchange="handleCameraCapture(event)">
 
     <div id="viewport-wrapper">
         <div id="app-container">
-            
-            <!-- SCREEN 1: TERMINAL -->
             <div id="screen-chat" class="screen">
                 <div id="avatar-panel">
                     <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
-                    
-                    <div class="avatar-wrapper">
-                        <div class="outer-ring"></div>
-                        <div class="pulse-ring"></div>
-                        <div class="inner-core"></div>
-                    </div>
-
-                    <div class="hud-stat-box">
-                        STATUS: ACTIVE<br>
-                        LINK: ONLINE<br>
-                        SYS.VER: 4.5<br>
-                        AUDIO: 11LABS
-                    </div>
-
-                    <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">
-                        SWIPE LEFT ➔<br>COMMAND DECK
-                    </div>
+                    <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
+                    <div class="hud-stat-box">STATUS: ACTIVE<br>LINK: ONLINE<br>SYS.VER: 4.6<br>AUDIO: 11LABS</div>
+                    <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
-                
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
@@ -491,29 +232,22 @@ MOBILE_HTML = """
                 </div>
             </div>
 
-            <!-- SCREEN 2: QUICK COMMANDS & MACRO DECK -->
             <div id="screen-commands" class="screen">
                 <div style="color: var(--main); font-weight: bold; margin-bottom: 6px; font-size: 11px;">
-                    <span style="float: left;" onclick="goToScreen(0)">← SWIPE RIGHT</span> 
-                    &nbsp;&nbsp;&nbsp;COMMAND DECK // MACROS
+                    <span style="float: left;" onclick="goToScreen(0)">← SWIPE RIGHT</span> &nbsp;&nbsp;&nbsp;COMMAND DECK // MACROS
                 </div>
-                
                 <div class="grid-container" id="macro-grid-container">
                     <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ OPEN TACTICAL KEYBOARD ]</div>
-                    
                     <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
                     <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
                     <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
-                    
                     <div class="cmd-btn" id="mute-btn" onclick="toggleMute()">🔇 Mute</div>
                     <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
                     <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
-
                     <div class="cmd-btn" onclick="triggerHudNotification('Neural link verified. HUD alert active.')">🔔 Notify</div>
                     <div class="cmd-btn" onclick="openMacroBuilder()" style="background: var(--bg); color: #fff;">➕ Add Macro</div>
                 </div>
             </div>
-
         </div>
     </div>
 
@@ -539,14 +273,10 @@ MOBILE_HTML = """
         let isMuted = false;
 
         function initAudio() {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
             if (!humOsc) {
-                // Background Engine Hum
                 humOsc = audioCtx.createOscillator();
                 humOsc.type = 'triangle';
                 humOsc.frequency.setValueAtTime(55, audioCtx.currentTime); 
@@ -562,65 +292,84 @@ MOBILE_HTML = """
                 filter.connect(humGain);
                 humGain.connect(audioCtx.destination);
                 humOsc.start();
-                
-                playBootSound();
             }
         }
 
-        function playBeep() {
+        // New Cyberpunk Click (Mechanical Tick)
+        function playCyberClick() {
             if(!audioCtx || audioCtx.state === 'suspended' || isMuted) return;
             const osc = audioCtx.createOscillator();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.05);
-            
             const gain = audioCtx.createGain();
-            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.03);
+            
+            gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
             
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.05);
+            osc.stop(audioCtx.currentTime + 0.03);
         }
 
         function playBootSound() {
-            if(isMuted) return;
+            if(!audioCtx || isMuted) return;
             const osc = audioCtx.createOscillator();
             osc.type = 'sawtooth';
             osc.frequency.setValueAtTime(150, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.4);
+            osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.6);
             
             const filter = audioCtx.createBiquadFilter();
             filter.type = 'lowpass';
             filter.frequency.setValueAtTime(200, audioCtx.currentTime);
-            filter.frequency.exponentialRampToValueAtTime(2000, audioCtx.currentTime + 0.4);
+            filter.frequency.exponentialRampToValueAtTime(3000, audioCtx.currentTime + 0.6);
             
             const gain = audioCtx.createGain();
             gain.gain.setValueAtTime(0, audioCtx.currentTime);
             gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.1);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
             
             osc.connect(filter);
             filter.connect(gain);
             gain.connect(audioCtx.destination);
             
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.4);
+            osc.stop(audioCtx.currentTime + 0.6);
         }
 
-        // Global listener to initialize audio and trigger click SFX
+        // BOOT SCREEN LOGIC
+        let lastTap = 0;
+        const bootScreen = document.getElementById('boot-screen');
+        const viewport = document.getElementById('viewport-wrapper');
+
+        function unlockTerminal() {
+            initAudio();
+            playBootSound();
+            bootScreen.style.opacity = '0';
+            setTimeout(() => {
+                bootScreen.style.display = 'none';
+                viewport.style.opacity = '1';
+            }, 800);
+        }
+
+        bootScreen.addEventListener('touchend', function(e) {
+            let currentTime = new Date().getTime();
+            let tapLength = currentTime - lastTap;
+            if (tapLength < 500 && tapLength > 0) { unlockTerminal(); e.preventDefault(); }
+            lastTap = currentTime;
+        });
+        bootScreen.addEventListener('dblclick', unlockTerminal);
+
         document.addEventListener('click', (e) => {
-            initAudio(); // Browsers require user interaction to unlock audio
+            if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
             if(e.target.closest('.cmd-btn') || e.target.closest('.kb-key') || e.target.closest('.mic-btn')) {
-                playBeep();
+                playCyberClick();
             }
         });
 
-        let touchstartX = 0;
-        let touchendX = 0;
-        let currentScreen = 0;
-        let toastTimeout = null;
+        // HUD LOGIC
+        let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
         function goToScreen(screenIndex) {
@@ -630,88 +379,50 @@ MOBILE_HTML = """
 
         function handleSwipe() {
             const diffX = touchendX - touchstartX;
-            if (diffX < -40) {
-                goToScreen(1);
-            } else if (diffX > 40) {
-                goToScreen(0);
-            }
+            if (diffX < -40) goToScreen(1);
+            else if (diffX > 40) goToScreen(0);
         }
 
-        document.addEventListener('touchstart', e => { 
-            touchstartX = e.changedTouches[0].screenX; 
-        }, { passive: true });
-
-        document.addEventListener('touchend', e => { 
-            touchendX = e.changedTouches[0].screenX; 
-            handleSwipe(); 
-        }, { passive: true });
-
+        document.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; }, { passive: true });
+        document.addEventListener('touchend', e => { touchendX = e.changedTouches[0].screenX; handleSwipe(); }, { passive: true });
         document.addEventListener('touchmove', function(e) {
-            if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container')) {
-                e.preventDefault();
-            }
+            if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); }
         }, { passive: false });
 
-        let kbString = "";
-        let isProcessing = false;
-        let currentAudio = null;
-
+        let kbString = ""; let isProcessing = false; let currentAudio = null;
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
         const chatBox = document.getElementById('chat-box');
 
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100vh'; }
-        
-        function typeChar(char) {
-            if(kbString.length < 80) { kbString += char; updateKbDisplay(); }
-        }
-        function backspace() {
-            kbString = kbString.slice(0, -1);
-            updateKbDisplay();
-        }
+        function typeChar(char) { if(kbString.length < 80) { kbString += char; updateKbDisplay(); } }
+        function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
 
-        // --- CYBERPUNK HUD NOTIFICATION TOAST ---
         function triggerHudNotification(message) {
             const toast = document.getElementById('hud-toast');
-            const textEl = document.getElementById('toast-text-el');
-            textEl.innerText = message;
-            
+            document.getElementById('toast-text-el').innerText = message;
             toast.classList.add('show');
             if (toastTimeout) clearTimeout(toastTimeout);
-            
-            toastTimeout = setTimeout(() => {
-                toast.classList.remove('show');
-            }, 4000);
+            toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, 4000);
         }
 
-        // --- MUTE / UNMUTE TOGGLE LOGIC ---
         function toggleMute() {
             isMuted = !isMuted;
             const muteBtn = document.getElementById('mute-btn');
             if (isMuted) {
-                muteBtn.innerText = "🔊 Unmute";
-                muteBtn.style.background = "var(--dark)";
-                if (currentAudio) {
-                    currentAudio.pause();
-                    currentAudio.currentTime = 0;
-                }
-                if (humGain && audioCtx) {
-                    humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
-                }
+                muteBtn.innerText = "🔊 Unmute"; muteBtn.style.background = "var(--dark)";
+                if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
+                if (humGain && audioCtx) humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
                 triggerHudNotification("N.E.O.N. audio muted.");
             } else {
-                muteBtn.innerText = "🔇 Mute";
-                muteBtn.style.background = "#14060d";
-                if (humGain && audioCtx) {
-                    humGain.gain.setTargetAtTime(0.03, audioCtx.currentTime, 0.1);
-                }
+                muteBtn.innerText = "🔇 Mute"; muteBtn.style.background = "#14060d";
+                if (humGain && audioCtx) humGain.gain.setTargetAtTime(0.03, audioCtx.currentTime, 0.1);
                 triggerHudNotification("N.E.O.N. audio restored.");
             }
         }
 
-        // --- CUSTOM MACRO BUILDER LOGIC ---
         function loadCustomMacros() {
             const saved = localStorage.getItem('neon_custom_macros');
             if (!saved) return;
@@ -720,293 +431,127 @@ MOBILE_HTML = """
                 const container = document.getElementById('macro-grid-container');
                 macros.forEach(m => {
                     const btn = document.createElement('div');
-                    btn.className = 'cmd-btn custom-macro-btn';
-                    btn.innerText = m.name;
-                    btn.onclick = () => sendMacro(m.prompt);
+                    btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = m.name; btn.onclick = () => sendMacro(m.prompt);
                     container.appendChild(btn);
                 });
-            } catch(e) { console.log("Macro load error", e); }
+            } catch(e) {}
         }
 
         function openMacroBuilder() {
-            const name = prompt("Enter button label (e.g., ⚡ Status):");
-            if (!name) return;
-            const promptText = prompt("Enter the command prompt for N.E.O.N.:");
-            if (!promptText) return;
-
+            const name = prompt("Enter button label (e.g., ⚡ Status):"); if (!name) return;
+            const promptText = prompt("Enter the command prompt for N.E.O.N.:"); if (!promptText) return;
             let macros = [];
             const saved = localStorage.getItem('neon_custom_macros');
-            if (saved) {
-                try { macros = JSON.parse(saved); } catch(e) {}
-            }
+            if (saved) { try { macros = JSON.parse(saved); } catch(e) {} }
             macros.push({ name: name, prompt: promptText });
             localStorage.setItem('neon_custom_macros', JSON.stringify(macros));
-
             const container = document.getElementById('macro-grid-container');
-            const btn = document.createElement('div');
-            btn.className = 'cmd-btn custom-macro-btn';
-            btn.innerText = name;
-            btn.onclick = () => sendMacro(promptText);
+            const btn = document.createElement('div'); btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = name; btn.onclick = () => sendMacro(promptText);
             container.appendChild(btn);
             triggerHudNotification(`Macro '${name}' successfully compiled.`);
         }
 
-        window.addEventListener('DOMContentLoaded', () => {
-            loadCustomMacros();
-        });
+        window.addEventListener('DOMContentLoaded', () => { loadCustomMacros(); });
         
         function triggerMobileCamera() {
-            if (isProcessing) return;
-            document.getElementById('camera-file-input').click();
+            if (isProcessing) return; document.getElementById('camera-file-input').click();
         }
 
         function handleCameraCapture(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
+            const file = event.target.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = function(e) {
                 const img = new Image();
                 img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    const maxDim = 800;
-                    let width = img.width;
-                    let height = img.height;
-                    
-                    if (width > height) {
-                        if (width > maxDim) { height *= maxDim / width; width = maxDim; }
-                    } else {
-                        if (height > maxDim) { width *= maxDim / height; height = maxDim; }
-                    }
-                    
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    
-                    const resizedBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
-                    sendImageToNeon(resizedBase64);
+                    const canvas = document.createElement('canvas'); const maxDim = 800; let width = img.width; let height = img.height;
+                    if (width > height) { if (width > maxDim) { height *= maxDim / width; width = maxDim; } } else { if (height > maxDim) { width *= maxDim / height; height = maxDim; } }
+                    canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, width, height);
+                    const resizedBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1]; sendImageToNeon(resizedBase64);
                 };
                 img.src = e.target.result;
             };
-            reader.readAsDataURL(file);
-            event.target.value = ''; 
+            reader.readAsDataURL(file); event.target.value = ''; 
         }
 
         async function sendImageToNeon(base64Image) {
-            if (isProcessing) return;
-            isProcessing = true;
-
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio.currentTime = 0;
-                currentAudio = null;
-            }
-
-            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-
-            const thinkingId = "think-" + Date.now();
-            chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-
+            if (isProcessing) return; isProcessing = true;
+            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
+            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
+            const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             goToScreen(0); 
-
             try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        message: "Describe what you see in this picture concise and clearly.",
-                        image: base64Image 
-                    })
-                });
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "Describe what you see in this picture concise and clearly.", image: base64Image }) });
                 const data = await response.json();
-
-                const thnkEl = document.getElementById(thinkingId);
-                if(thnkEl) thnkEl.remove();
-
-                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
-                chatBox.scrollTop = chatBox.scrollHeight;
-
-                if (data.audio_url && !isMuted) {
-                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
-                }
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
+                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
+                if (data.audio_url && !isMuted) { currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime()); currentAudio.play().catch(e => console.log("Audio error", e)); }
             } catch (error) {
-                const thnkEl = document.getElementById(thinkingId);
-                if(thnkEl) thnkEl.remove();
-                chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
-            } finally {
-                isProcessing = false;
-            }
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
+            } finally { isProcessing = false; }
         }
 
         function getLocationAndSend() {
             if (isProcessing) return;
-
-            if (!navigator.geolocation) {
-                sendMacro("What is my current location?");
-                return;
-            }
-
-            chatBox.innerHTML += `<br>> <span style="color: var(--main); font-style: italic;">> Acquiring satellite GPS fix...</span>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-
+            if (!navigator.geolocation) { sendMacro("What is my current location?"); return; }
+            chatBox.innerHTML += `<br>> <span style="color: var(--main); font-style: italic;">> Acquiring satellite GPS fix...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             navigator.geolocation.getCurrentPosition(
                 async (position) => {
-                    const lat = position.coords.latitude;
-                    const lon = position.coords.longitude;
-
+                    const lat = position.coords.latitude; const lon = position.coords.longitude;
                     try {
                         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
                         const data = await res.json();
-                        const address = data.display_name || `Latitude ${lat}, Longitude ${lon}`;
-                        
-                        sendMacro(`My physical GPS location is currently ${address}. Acknowledge my location.`);
-                    } catch (e) {
-                        sendMacro(`My GPS coordinates are Latitude: ${lat}, Longitude: ${lon}. Tell me where I am.`);
-                    }
+                        sendMacro(`My physical GPS location is currently ${data.display_name || `Lat ${lat}, Lon ${lon}`}. Acknowledge my location.`);
+                    } catch (e) { sendMacro(`My GPS coordinates are Latitude: ${lat}, Longitude: ${lon}. Tell me where I am.`); }
                 },
-                (error) => {
-                    console.log("GPS Error:", error);
-                    alert("Location access denied. Please enable Location/GPS in browser settings.");
-                },
+                (error) => { alert("Location access denied."); },
                 { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
             );
         }
 
-        let recognition = null;
-        let isListening = false;
-
+        let recognition = null; let isListening = false;
         function initSpeechEngine() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return false;
-
-            recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
-
+            recognition = new SpeechRecognition(); recognition.continuous = false; recognition.interimResults = false; recognition.lang = 'en-US';
             recognition.onstart = function() {
-                isListening = true;
-                const micBtn = document.getElementById('mic-button-el');
-                micBtn.innerText = "🎙️ LISTENING...";
-                micBtn.style.background = "var(--accent)";
-                micBtn.style.color = "#fff";
-                micBtn.style.boxShadow = "0 0 18px var(--main)";
+                isListening = true; const micBtn = document.getElementById('mic-button-el');
+                micBtn.innerText = "🎙️ LISTENING..."; micBtn.style.background = "var(--accent)"; micBtn.style.color = "#fff"; micBtn.style.boxShadow = "0 0 18px var(--main)";
             };
-
-            recognition.onresult = function(event) {
-                const transcript = event.results[0][0].transcript;
-                console.log("Voice Captured:", transcript);
-                sendMacro(transcript);
-            };
-
-            recognition.onerror = function(event) {
-                console.log("Speech Error:", event.error);
-                if (event.error === 'not-allowed') {
-                    alert("Microphone permission denied! Tap the lock icon in your browser URL bar to allow microphone access.");
-                }
-                stopListeningUI();
-            };
-
-            recognition.onend = function() {
-                stopListeningUI();
-            };
+            recognition.onresult = function(event) { sendMacro(event.results[0][0].transcript); };
+            recognition.onerror = function(event) { stopListeningUI(); };
+            recognition.onend = function() { stopListeningUI(); };
             return true;
         }
 
         function stopListeningUI() {
-            isListening = false;
-            const micBtn = document.getElementById('mic-button-el');
-            micBtn.innerText = "HOLD TO SPEAK";
-            micBtn.style.background = "var(--bg)";
-            micBtn.style.color = "var(--main)";
-            micBtn.style.boxShadow = "0 0 10px var(--dark)";
+            isListening = false; const micBtn = document.getElementById('mic-button-el');
+            micBtn.innerText = "HOLD TO SPEAK"; micBtn.style.background = "var(--bg)"; micBtn.style.color = "var(--main)"; micBtn.style.boxShadow = "0 0 10px var(--dark)";
         }
 
         function toggleMic() {
             if (isProcessing) return;
-
-            if (!recognition && !initSpeechEngine()) {
-                alert("Speech recognition is not supported on this browser version. Try iOS Safari or Android Chrome.");
-                return;
-            }
-
-            if (isListening) {
-                recognition.stop();
-            } else {
-                try {
-                    recognition.start();
-                } catch(e) {
-                    console.log("Mic start catch:", e);
-                    initSpeechEngine();
-                    recognition.start();
-                }
-            }
+            if (!recognition && !initSpeechEngine()) { alert("Speech recognition not supported."); return; }
+            if (isListening) recognition.stop(); else { try { recognition.start(); } catch(e) { initSpeechEngine(); recognition.start(); } }
         }
 
-        function sendMacro(text) {
-            if (isProcessing) return;
-            kbString = text;
-            executeKeyboard();
-        }
+        function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
 
         async function executeKeyboard() {
-            if (isProcessing) return;
-
-            const text = kbString.trim();
-            if(text === "") {
-                closeKeyboard();
-                return;
-            }
-
+            if (isProcessing) return; const text = kbString.trim(); if(text === "") { closeKeyboard(); return; }
             isProcessing = true;
-
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio.currentTime = 0;
-                currentAudio = null;
-            }
-
-            chatBox.innerHTML += `<br>> <b>User:</b> ${text}`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-            
-            const thinkingId = "think-" + Date.now();
-            chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`;
-            chatBox.scrollTop = chatBox.scrollHeight;
-            
-            kbString = "";
-            updateKbDisplay();
-            closeKeyboard();
-            goToScreen(0);
-
+            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
+            chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
+            const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
+            kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
             try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text })
-                });
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
                 const data = await response.json();
-                
-                const thnkEl = document.getElementById(thinkingId);
-                if(thnkEl) thnkEl.remove();
-                
-                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
-                chatBox.scrollTop = chatBox.scrollHeight;
-
-                if (data.audio_url && !isMuted) {
-                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
-                }
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
+                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
+                if (data.audio_url && !isMuted) { currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime()); currentAudio.play().catch(e => console.log("Audio error", e)); }
             } catch (error) {
-                const thnkEl = document.getElementById(thinkingId);
-                if(thnkEl) thnkEl.remove();
-                chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
-            } finally {
-                isProcessing = false;
-            }
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
+            } finally { isProcessing = false; }
         }
     </script>
 </body>
@@ -1014,35 +559,25 @@ MOBILE_HTML = """
 """
 
 @app.route("/")
-def home():
-    return render_template_string(MOBILE_HTML)
-
+def home(): return render_template_string(MOBILE_HTML)
 @app.route("/static/<path:filename>")
-def serve_static(filename):
-    return send_from_directory(STATIC_DIR, filename)
+def serve_static(filename): return send_from_directory(STATIC_DIR, filename)
 
 @app.route("/chat", methods=["POST"])
 def chat():
     global chat_history
     user_message = request.json.get("message", "")
     image_b64 = request.json.get("image", None)
-    
     try:
         ai_response = None
-
         if image_b64 and gemini_client:
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
             img_bytes = base64.b64decode(clean_b64)
-            
             response = gemini_client.models.generate_content(
                 model="gemini-3.6-flash",
-                contents=[
-                    types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-                    user_message if user_message else "Describe what you see in this picture clearly."
-                ]
+                contents=[types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), user_message if user_message else "Describe what you see clearly."]
             )
             ai_response = response.text
-            
             chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
             chat_history.append(AIMessage(content=ai_response))
         elif image_b64 and not gemini_client:
@@ -1065,13 +600,9 @@ def chat():
                 for chunk in audio_generator:
                     if chunk: f.write(chunk)
             audio_url = f"/static/{audio_filename}?v=1"
-        else:
-            audio_url = None
+        else: audio_url = None
 
-        return jsonify({
-            "response": ai_response.replace('\n', '<br>'),
-            "audio_url": audio_url
-        })
+        return jsonify({"response": ai_response.replace('\n', '<br>'), "audio_url": audio_url})
     except Exception as e:
         return jsonify({"response": f"System Error: {str(e)}", "audio_url": None})
 
