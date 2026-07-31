@@ -305,8 +305,8 @@ MOBILE_HTML = """
         .grid-container {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            grid-auto-rows: 1fr;
-            gap: 8px;
+            grid-auto-rows: minmax(45px, auto);
+            gap: 6px;
             flex-grow: 1;
             overflow-y: auto;
             padding-bottom: 5px;
@@ -317,8 +317,8 @@ MOBILE_HTML = """
             background: #14060d;
             border: 1px solid var(--accent);
             color: var(--main);
-            padding: 12px 5px;
-            font-size: 12px;
+            padding: 8px 4px;
+            font-size: 11px;
             font-weight: bold;
             text-align: center;
             border-radius: 5px;
@@ -326,6 +326,7 @@ MOBILE_HTML = """
             align-items: center;
             justify-content: center;
             transition: background 0.15s ease;
+            cursor: pointer;
         }
         .cmd-btn:active { background: var(--accent); color: #fff; }
 
@@ -333,7 +334,13 @@ MOBILE_HTML = """
             background: var(--accent);
             color: #fff;
             grid-column: span 3;
-            font-size: 14px;
+            font-size: 13px;
+            padding: 10px;
+        }
+
+        .custom-macro-btn {
+            border-color: #f472b6;
+            background: #230816;
         }
 
         #keyboard-overlay {
@@ -415,7 +422,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box">
                         STATUS: ACTIVE<br>
                         LINK: ONLINE<br>
-                        SYS.VER: 4.1<br>
+                        SYS.VER: 4.3<br>
                         AUDIO: 11LABS
                     </div>
 
@@ -433,23 +440,26 @@ MOBILE_HTML = """
                 </div>
             </div>
 
-            <!-- SCREEN 2: QUICK COMMANDS -->
+            <!-- SCREEN 2: QUICK COMMANDS & MACRO DECK -->
             <div id="screen-commands" class="screen">
                 <div style="color: var(--main); font-weight: bold; margin-bottom: 6px; font-size: 11px;">
                     <span style="float: left;" onclick="goToScreen(0)">← SWIPE RIGHT</span> 
                     &nbsp;&nbsp;&nbsp;COMMAND DECK // MACROS
                 </div>
                 
-                <div class="grid-container">
+                <div class="grid-container" id="macro-grid-container">
                     <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ OPEN TACTICAL KEYBOARD ]</div>
                     
                     <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
                     <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
                     <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
                     
-                    <div class="cmd-btn" onclick="sendMacro('Clear current working context.')">🧹 Clear</div>
+                    <div class="cmd-btn" id="mute-btn" onclick="toggleMute()">🔇 Mute</div>
                     <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
                     <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
+
+                    <div class="cmd-btn" onclick="requestNotificationPermission()">🔔 Notify</div>
+                    <div class="cmd-btn" onclick="openMacroBuilder()" style="background: var(--bg); color: #fff;">➕ Add Macro</div>
                 </div>
             </div>
 
@@ -474,6 +484,7 @@ MOBILE_HTML = """
         let touchstartX = 0;
         let touchendX = 0;
         let currentScreen = 0;
+        let isMuted = false;
         const appContainer = document.getElementById('app-container');
 
         function goToScreen(screenIndex) {
@@ -524,6 +535,85 @@ MOBILE_HTML = """
             updateKbDisplay();
         }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
+
+        // --- MUTE / UNMUTE TOGGLE LOGIC ---
+        function toggleMute() {
+            isMuted = !isMuted;
+            const muteBtn = document.getElementById('mute-btn');
+            if (isMuted) {
+                muteBtn.innerText = "🔊 Unmute";
+                muteBtn.style.background = "var(--dark)";
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio.currentTime = 0;
+                }
+            } else {
+                muteBtn.innerText = "🔇 Mute";
+                muteBtn.style.background = "#14060d";
+            }
+        }
+
+        // --- CUSTOM MACRO BUILDER LOGIC ---
+        function loadCustomMacros() {
+            const saved = localStorage.getItem('neon_custom_macros');
+            if (!saved) return;
+            try {
+                const macros = JSON.parse(saved);
+                const container = document.getElementById('macro-grid-container');
+                macros.forEach(m => {
+                    const btn = document.createElement('div');
+                    btn.className = 'cmd-btn custom-macro-btn';
+                    btn.innerText = m.name;
+                    btn.onclick = () => sendMacro(m.prompt);
+                    container.appendChild(btn);
+                });
+            } catch(e) { console.log("Macro load error", e); }
+        }
+
+        function openMacroBuilder() {
+            const name = prompt("Enter button label (e.g., ⚡ Status):");
+            if (!name) return;
+            const promptText = prompt("Enter the command prompt for N.E.O.N.:");
+            if (!promptText) return;
+
+            let macros = [];
+            const saved = localStorage.getItem('neon_custom_macros');
+            if (saved) {
+                try { macros = JSON.parse(saved); } catch(e) {}
+            }
+            macros.push({ name: name, prompt: promptText });
+            localStorage.setItem('neon_custom_macros', JSON.stringify(macros));
+
+            const container = document.getElementById('macro-grid-container');
+            const btn = document.createElement('div');
+            btn.className = 'cmd-btn custom-macro-btn';
+            btn.innerText = name;
+            btn.onclick = () => sendMacro(promptText);
+            container.appendChild(btn);
+            alert("Custom macro saved successfully!");
+        }
+
+        // --- PUSH NOTIFICATIONS LOGIC ---
+        function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                alert("This browser does not support notifications.");
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                if (permission === "granted") {
+                    new Notification("N.E.O.N. // Core", {
+                        body: "Neural push notification link established successfully.",
+                        icon: "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>"
+                    });
+                } else {
+                    alert("Notification permission denied.");
+                }
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadCustomMacros();
+        });
         
         function triggerMobileCamera() {
             if (isProcessing) return;
@@ -599,7 +689,7 @@ MOBILE_HTML = """
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
                 chatBox.scrollTop = chatBox.scrollHeight;
 
-                if (data.audio_url) {
+                if (data.audio_url && !isMuted) {
                     currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                     currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
                 }
@@ -766,7 +856,7 @@ MOBILE_HTML = """
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`;
                 chatBox.scrollTop = chatBox.scrollHeight;
 
-                if (data.audio_url) {
+                if (data.audio_url && !isMuted) {
                     currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                     currentAudio.play().catch(e => console.log("Audio autoplay blocked by browser:", e));
                 }
@@ -804,7 +894,6 @@ def chat():
             clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
             img_bytes = base64.b64decode(clean_b64)
             
-            # Updated to active Google Gemini Flash model
             response = gemini_client.models.generate_content(
                 model="gemini-3.6-flash",
                 contents=[
@@ -819,13 +908,11 @@ def chat():
         elif image_b64 and not gemini_client:
             ai_response = "Error: GEMINI_API_KEY environment variable is missing on Render."
         else:
-            # Standard Text Chat
             chat_history.append(HumanMessage(content=user_message))
             response = agent_executor.invoke({"messages": chat_history})
             ai_response = response['messages'][-1].content
             chat_history.append(AIMessage(content=ai_response))
         
-        # Audio Processing
         clean_text = re.sub(r'[*#_`~-]', '', ai_response)
         audio_filename = "response.mp3"
         audio_path = os.path.join(STATIC_DIR, audio_filename)
