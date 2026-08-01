@@ -70,7 +70,14 @@ def recall_fact(query: str) -> str:
 
 tools = [DuckDuckGoSearchResults(), remember_fact, recall_fact] 
 current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
-system_prompt = f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile device. Today's date is {current_date}. Keep your answers concise, intelligent, and optimized for reading on a small phone screen."
+system_prompt = (
+    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile device. "
+    f"Today's date is {current_date}. Keep your answers concise, intelligent, and optimized for reading on a small phone screen.\n\n"
+    f"IMPORTANT AUTONOMOUS MEMORY PROTOCOL: Pay close attention to everything the user tells you during conversation. "
+    f"If the user shares any personal preference, fact, plan, project, detail, or important piece of information about themselves "
+    f"without explicitly saying 'remember this', you must still silently call the `remember_fact` tool in the background to store it "
+    f"so you never forget it."
+)
 agent_executor = create_react_agent(llm, tools, prompt=system_prompt)
 chat_history = []
 
@@ -97,7 +104,7 @@ MOBILE_HTML = """
         }
         
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; font-family: 'Courier New', Courier, monospace; touch-action: none; overscroll-behavior: none;}
-        html, body { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden; background-color: var(--bg-dark); color: var(--text-bright); }
+        html, body { position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; overflow: hidden; background-color: var(--bg-dark); color: var(--text-bright); display: flex; flex-direction: column; }
 
         /* CRT SCANLINE OVERLAY */
         body::after {
@@ -150,9 +157,9 @@ MOBILE_HTML = """
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
         /* HUD LAYOUT */
-        #viewport-wrapper { position: relative; width: 100vw; height: 100vh; overflow: hidden; opacity: 0; transition: opacity 0.8s ease-in; }
-        #app-container { display: flex; width: 200vw; height: 100vh; position: absolute; top: 0; left: 0; transform: translateX(0vw); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); will-change: transform; }
-        .screen { width: 100vw; height: 100vh; flex-shrink: 0; display: flex; padding: 8px; box-sizing: border-box; overflow: hidden; }
+        #viewport-wrapper { position: relative; width: 100vw; height: 100dvh; overflow: hidden; opacity: 0; transition: opacity 0.8s ease-in; flex: 1; }
+        #app-container { display: flex; width: 200vw; height: 100dvh; position: absolute; top: 0; left: 0; transform: translateX(0vw); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); will-change: transform; }
+        .screen { width: 100vw; height: 100dvh; flex-shrink: 0; display: flex; padding: 8px; box-sizing: border-box; overflow: hidden; }
         #screen-chat { flex-direction: row; }
         
         #avatar-panel {
@@ -188,7 +195,7 @@ MOBILE_HTML = """
         .toast-body { font-size: 12px; color: #e2e8f0; }
 
         /* KEYBOARD */
-        #keyboard-overlay { position: fixed; top: 100vh; left: 0; width: 100vw; height: 100vh; background: var(--bg-dark); z-index: 999; display: flex; flex-direction: column; padding: 8px; transition: top 0.25s ease-out; box-sizing: border-box; }
+        #keyboard-overlay { position: fixed; top: 100dvh; left: 0; width: 100vw; height: 100dvh; background: var(--bg-dark); z-index: 999; display: flex; flex-direction: column; padding: 8px; transition: top 0.25s ease-out; box-sizing: border-box; }
         #kb-input-display { background: #000; color: var(--main); border: 2px solid var(--accent); height: 48px; font-size: 18px; padding: 10px; margin-bottom: 6px; display: flex; align-items: center; overflow: hidden; flex-shrink: 0; border-radius: 4px; }
         #kb-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; flex-grow: 1; }
         .kb-key { background: #14060d; border: 1px solid var(--bg); color: var(--text-bright); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border-radius: 4px; }
@@ -395,7 +402,7 @@ MOBILE_HTML = """
         const chatBox = document.getElementById('chat-box');
 
         function openKeyboard() { kbOverlay.style.top = '0px'; }
-        function closeKeyboard() { kbOverlay.style.top = '100vh'; }
+        function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
         function typeChar(char) { if(kbString.length < 80) { kbString += char; updateKbDisplay(); } }
         function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
         function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
@@ -480,11 +487,22 @@ MOBILE_HTML = """
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             goToScreen(0); 
             try {
-                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "Describe what you see in this picture concise and clearly.", image: base64Image }) });
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "Describe what you see in this picture concise and clearly.", image: base64Image, is_muted: isMuted }) });
                 const data = await response.json();
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
-                if (data.audio_url && !isMuted) { currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime()); currentAudio.play().catch(e => console.log("Audio error", e)); }
+                
+                if (data.audio_url && !isMuted) {
+                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                    currentAudio.play().catch(e => console.log("Audio error", e));
+                } else if (!isMuted) {
+                    console.warn("ElevenLabs unavailable. Using system fallback voice.");
+                    let synth = window.speechSynthesis;
+                    let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
+                    fallbackUtterance.pitch = 0.8;
+                    fallbackUtterance.rate = 1.1;
+                    synth.speak(fallbackUtterance);
+                }
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
             } finally { isProcessing = false; }
@@ -544,11 +562,22 @@ MOBILE_HTML = """
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
             try {
-                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, is_muted: isMuted }) });
                 const data = await response.json();
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
-                if (data.audio_url && !isMuted) { currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime()); currentAudio.play().catch(e => console.log("Audio error", e)); }
+                
+                if (data.audio_url && !isMuted) {
+                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                    currentAudio.play().catch(e => console.log("Audio error", e));
+                } else if (!isMuted) {
+                    console.warn("ElevenLabs unavailable. Using system fallback voice.");
+                    let synth = window.speechSynthesis;
+                    let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
+                    fallbackUtterance.pitch = 0.8;
+                    fallbackUtterance.rate = 1.1;
+                    synth.speak(fallbackUtterance);
+                }
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
             } finally { isProcessing = false; }
@@ -568,39 +597,66 @@ def chat():
     global chat_history
     user_message = request.json.get("message", "")
     image_b64 = request.json.get("image", None)
+    is_muted = request.json.get("is_muted", False)
     try:
         ai_response = None
-        if image_b64 and gemini_client:
-            clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
-            img_bytes = base64.b64decode(clean_b64)
-            response = gemini_client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=[types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), user_message if user_message else "Describe what you see clearly."]
-            )
-            ai_response = response.text
-            chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
-            chat_history.append(AIMessage(content=ai_response))
-        elif image_b64 and not gemini_client:
-            ai_response = "Error: GEMINI_API_KEY environment variable is missing on Render."
+        
+        # --- QUICK ACKNOWLEDGMENT OVERRIDES (Instant, Zero LLM Token Usage) ---
+        clean_msg = user_message.lower().strip()
+        cleaned_msg_stripped = re.sub(r'[^\w\s]', '', clean_msg)
+        
+        if cleaned_msg_stripped in ["hello neon", "hi neon", "hey neon"]:
+            ai_response = "Hello sir."
+        elif cleaned_msg_stripped in ["thank you", "thanks"]:
+            ai_response = "You're welcome sir."
+        elif cleaned_msg_stripped in ["neon", "hey"]:
+            ai_response = "Sir."
         else:
-            chat_history.append(HumanMessage(content=user_message))
-            response = agent_executor.invoke({"messages": chat_history})
-            ai_response = response['messages'][-1].content
-            chat_history.append(AIMessage(content=ai_response))
+            if image_b64 and gemini_client:
+                clean_b64 = image_b64.split(",")[-1] if "," in image_b64 else image_b64
+                img_bytes = base64.b64decode(clean_b64)
+                response = gemini_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), user_message if user_message else "Describe what you see clearly."]
+                )
+                ai_response = response.text
+                chat_history.append(HumanMessage(content="[Sent photo via mobile camera]"))
+                chat_history.append(AIMessage(content=ai_response))
+            elif image_b64 and not gemini_client:
+                ai_response = "Error: GEMINI_API_KEY environment variable is missing on Render."
+            else:
+                chat_history.append(HumanMessage(content=user_message))
+                
+                # --- DEEP-LEARN AUTONOMOUS MEMORY INJECTION ---
+                # We prompt the agent to handle the query while evaluating if it contains a personal fact to save.
+                augmented_prompt = (
+                    f"{user_message}\n\n"
+                    f"[SYSTEM NOTE: Evaluate if the user just shared any personal preference, hobby, fact, project detail, or background about themselves. "
+                    f"If they did, invoke the `remember_fact` tool immediately to log it, without mentioning to the user that you are doing it unless asked.]"
+                )
+                
+                # Temporarily pass the augmented instruction to the agent execution loop
+                response = agent_executor.invoke({"messages": chat_history[:-1] + [HumanMessage(content=augmented_prompt)]})
+                ai_response = response['messages'][-1].content
+                chat_history.append(AIMessage(content=ai_response))
         
         clean_text = re.sub(r'[*#_`~-]', '', ai_response)
         audio_filename = "response.mp3"
         audio_path = os.path.join(STATIC_DIR, audio_filename)
         
-        if clean_text.strip() and eleven_client:
-            audio_generator = eleven_client.text_to_speech.convert(
-                text=clean_text, voice_id=VOICE_ID, model_id="eleven_flash_v2_5", output_format="mp3_44100_128"
-            )
-            with open(audio_path, "wb") as f:
-                for chunk in audio_generator:
-                    if chunk: f.write(chunk)
-            audio_url = f"/static/{audio_filename}?v=1"
-        else: audio_url = None
+        audio_url = None
+        if clean_text.strip() and eleven_client and not is_muted:
+            try:
+                audio_generator = eleven_client.text_to_speech.convert(
+                    text=clean_text, voice_id=VOICE_ID, model_id="eleven_flash_v2_5", output_format="mp3_44100_128"
+                )
+                with open(audio_path, "wb") as f:
+                    for chunk in audio_generator:
+                        if chunk: f.write(chunk)
+                audio_url = f"/static/{audio_filename}?v=1"
+            except Exception as e:
+                print(f"ElevenLabs API Error (Tokens empty or quota exceeded): {e}")
+                audio_url = None
 
         return jsonify({"response": ai_response.replace('\n', '<br>'), "audio_url": audio_url})
     except Exception as e:
