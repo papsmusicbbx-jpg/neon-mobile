@@ -404,7 +404,6 @@ MOBILE_HTML = """
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
         
-        // Removed character length limit so you can type infinitely
         function typeChar(char) { 
             kbString += char; 
             updateKbDisplay(); 
@@ -418,7 +417,7 @@ MOBILE_HTML = """
         function updateKbDisplay() { 
             kbDisplay.innerText = kbString + "_"; 
             const displayEl = document.getElementById('kb-input-display');
-            displayEl.scrollLeft = displayEl.scrollWidth; // Auto-scroll right as you type more
+            displayEl.scrollLeft = displayEl.scrollWidth; 
         }
 
         function triggerHudNotification(message) {
@@ -509,8 +508,8 @@ MOBILE_HTML = """
                 if (data.audio_url && !isMuted) {
                     currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                     currentAudio.play().catch(e => console.log("Audio error", e));
-                } else if (!isMuted) {
-                    console.warn("ElevenLabs unavailable. Using system fallback voice.");
+                } else if (isMuted) {
+                    // FIXED: This will now speak using the stock device TTS even when N.E.O.N. is muted
                     let synth = window.speechSynthesis;
                     let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
                     fallbackUtterance.pitch = 0.8;
@@ -584,8 +583,8 @@ MOBILE_HTML = """
                 if (data.audio_url && !isMuted) {
                     currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                     currentAudio.play().catch(e => console.log("Audio error", e));
-                } else if (!isMuted) {
-                    console.warn("ElevenLabs unavailable. Using system fallback voice.");
+                } else if (isMuted) {
+                    // FIXED: This will now speak using the stock device TTS even when N.E.O.N. is muted
                     let synth = window.speechSynthesis;
                     let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
                     fallbackUtterance.pitch = 0.8;
@@ -657,6 +656,8 @@ def chat():
         audio_path = os.path.join(STATIC_DIR, audio_filename)
         
         audio_url = None
+        # FIXED BACKEND: If muted, do NOT call ElevenLabs AT ALL (saving tokens), 
+        # but let the frontend know it can fallback to stock speech.
         if clean_text.strip() and eleven_client and not is_muted:
             try:
                 audio_generator = eleven_client.text_to_speech.convert(
