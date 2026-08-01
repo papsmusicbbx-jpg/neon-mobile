@@ -196,7 +196,7 @@ MOBILE_HTML = """
 
         /* KEYBOARD */
         #keyboard-overlay { position: fixed; top: 100dvh; left: 0; width: 100vw; height: 100dvh; background: var(--bg-dark); z-index: 999; display: flex; flex-direction: column; padding: 8px; transition: top 0.25s ease-out; box-sizing: border-box; }
-        #kb-input-display { background: #000; color: var(--main); border: 2px solid var(--accent); height: 48px; font-size: 18px; padding: 10px; margin-bottom: 6px; display: flex; align-items: center; overflow: hidden; flex-shrink: 0; border-radius: 4px; }
+        #kb-input-display { background: #000; color: var(--main); border: 2px solid var(--accent); height: 48px; font-size: 18px; padding: 10px; margin-bottom: 6px; display: flex; align-items: center; overflow-x: auto; white-space: nowrap; flex-shrink: 0; border-radius: 4px; }
         #kb-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; flex-grow: 1; }
         .kb-key { background: #14060d; border: 1px solid var(--bg); color: var(--text-bright); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border-radius: 4px; }
         .kb-key:active { background: var(--accent); }
@@ -403,9 +403,23 @@ MOBILE_HTML = """
 
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
-        function typeChar(char) { if(kbString.length < 80) { kbString += char; updateKbDisplay(); } }
-        function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
-        function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; }
+        
+        // Removed character length limit so you can type infinitely
+        function typeChar(char) { 
+            kbString += char; 
+            updateKbDisplay(); 
+        }
+        
+        function backspace() { 
+            kbString = kbString.slice(0, -1); 
+            updateKbDisplay(); 
+        }
+        
+        function updateKbDisplay() { 
+            kbDisplay.innerText = kbString + "_"; 
+            const displayEl = document.getElementById('kb-input-display');
+            displayEl.scrollLeft = displayEl.scrollWidth; // Auto-scroll right as you type more
+        }
 
         function triggerHudNotification(message) {
             const toast = document.getElementById('hud-toast');
@@ -628,14 +642,12 @@ def chat():
                 chat_history.append(HumanMessage(content=user_message))
                 
                 # --- DEEP-LEARN AUTONOMOUS MEMORY INJECTION ---
-                # We prompt the agent to handle the query while evaluating if it contains a personal fact to save.
                 augmented_prompt = (
                     f"{user_message}\n\n"
                     f"[SYSTEM NOTE: Evaluate if the user just shared any personal preference, hobby, fact, project detail, or background about themselves. "
                     f"If they did, invoke the `remember_fact` tool immediately to log it, without mentioning to the user that you are doing it unless asked.]"
                 )
                 
-                # Temporarily pass the augmented instruction to the agent execution loop
                 response = agent_executor.invoke({"messages": chat_history[:-1] + [HumanMessage(content=augmented_prompt)]})
                 ai_response = response['messages'][-1].content
                 chat_history.append(AIMessage(content=ai_response))
