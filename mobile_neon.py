@@ -71,8 +71,8 @@ def recall_fact(query: str) -> str:
 tools = [DuckDuckGoSearchResults(), remember_fact, recall_fact] 
 current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
 system_prompt = (
-    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile device. "
-    f"Today's date is {current_date}. Keep your answers concise, intelligent, and optimized for reading on a small phone screen.\n\n"
+    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile/helmet device. "
+    f"Today's date is {current_date}. Keep your answers concise, intelligent, and optimized for voice speech and small screens.\n\n"
     f"IMPORTANT AUTONOMOUS MEMORY PROTOCOL: Pay close attention to everything the user tells you during conversation. "
     f"If the user shares any personal preference, fact, plan, project, detail, or important piece of information about themselves "
     f"without explicitly saying 'remember this', you must still silently call the `remember_fact` tool in the background to store it "
@@ -174,12 +174,13 @@ MOBILE_HTML = """
         @keyframes pulseGlow { 0% { transform: scale(0.96); box-shadow: 0 0 10px var(--accent), inset 0 0 5px var(--accent); } 100% { transform: scale(1.04); box-shadow: 0 0 22px var(--main), inset 0 0 14px var(--main); } }
         @keyframes coreBeat { 0% { transform: scale(0.88); opacity: 0.85; } 100% { transform: scale(1.12); opacity: 1; } }
 
-        .hud-stat-box { width: 100%; background: #050505; border: 1px solid var(--bg); border-radius: 4px; padding: 6px; font-size: 9px; color: var(--main); line-height: 1.4; }
+        .hud-stat-box { width: 100%; background: #050505; border: 1px solid var(--bg); border-radius: 4px; padding: 6px; font-size: 8px; color: var(--main); line-height: 1.4; }
         #terminal-panel { width: 68%; display: flex; flex-direction: column; padding-left: 8px; }
         #chat-box { flex-grow: 1; background: #050505; border: 1px solid var(--bg); color: #e2e8f0; padding: 10px; overflow-y: auto; font-size: 13px; margin-bottom: 8px; touch-action: pan-y; border-radius: 4px; }
         
-        .mic-btn { background: var(--bg); color: var(--main); border: 2px solid var(--accent); padding: 12px; text-align: center; font-weight: bold; font-size: 15px; border-radius: 6px; box-shadow: 0 0 10px var(--dark); transition: all 0.2s ease; flex-shrink: 0; }
-        .mic-btn:active { transform: scale(0.98); }
+        .mic-btn { background: var(--bg); color: var(--main); border: 2px solid var(--accent); padding: 10px 4px; text-align: center; font-weight: bold; font-size: 12px; border-radius: 6px; box-shadow: 0 0 10px var(--dark); transition: all 0.2s ease; flex-shrink: 0; }
+        .mic-btn.conversing { background: var(--accent); color: #fff; box-shadow: 0 0 18px var(--main); animation: activeGlow 1.5s infinite alternate; }
+        @keyframes activeGlow { 0% { border-color: var(--main); } 100% { border-color: #fff; } }
 
         #screen-commands { flex-direction: column; }
         .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(45px, auto); gap: 6px; flex-grow: 1; overflow-y: auto; padding-bottom: 5px; touch-action: pan-y; }
@@ -227,15 +228,21 @@ MOBILE_HTML = """
                 <div id="avatar-panel">
                     <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
                     <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
-                    <div class="hud-stat-box">STATUS: ACTIVE<br>LINK: ONLINE<br>SYS.VER: 4.6<br>AUDIO: 11LABS</div>
+                    <div class="hud-stat-box" id="hud-stat-box-el">
+                        STATUS: ONLINE<br>
+                        MIC: MONITORING<br>
+                        WAKE: "NEON"<br>
+                        SYS.VER: 4.8
+                    </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: var(--main);">> N.E.O.N. neural core online.</span><br>
+                        <span style="color: var(--main);">> Autonomous voice listening active.</span><br>
+                        <span style="color: #cbd5e1;">> Say <b>"Neon"</b> or <b>"Hey Neon"</b> to start.</span><br>
                     </div>
-                    <div class="mic-btn" id="mic-button-el" onclick="toggleMic()">HOLD TO SPEAK</div>
+                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">STANDBY (SAY "NEON")</div>
                 </div>
             </div>
 
@@ -302,7 +309,6 @@ MOBILE_HTML = """
             }
         }
 
-        // New Cyberpunk Click (Mechanical Tick)
         function playCyberClick() {
             if(!audioCtx || audioCtx.state === 'suspended' || isMuted) return;
             const osc = audioCtx.createOscillator();
@@ -357,6 +363,7 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
+                startContinuousListening(); // Start continuous wake-word loop automatically
             }, 800);
         }
 
@@ -495,6 +502,7 @@ MOBILE_HTML = """
 
         async function sendImageToNeon(base64Image) {
             if (isProcessing) return; isProcessing = true;
+            clearConversationCountdown();
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
             chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
@@ -505,20 +513,12 @@ MOBILE_HTML = """
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
                 
-                if (data.audio_url && !isMuted) {
-                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    currentAudio.play().catch(e => console.log("Audio error", e));
-                } else if (isMuted) {
-                    // FIXED: This will now speak using the stock device TTS even when N.E.O.N. is muted
-                    let synth = window.speechSynthesis;
-                    let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
-                    fallbackUtterance.pitch = 0.8;
-                    fallbackUtterance.rate = 1.1;
-                    synth.speak(fallbackUtterance);
-                }
+                playAiVoiceResponse(data);
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
-            } finally { isProcessing = false; }
+                isProcessing = false;
+                startConversationCountdown();
+            }
         }
 
         function getLocationAndSend() {
@@ -539,61 +539,214 @@ MOBILE_HTML = """
             );
         }
 
-        let recognition = null; let isListening = false;
-        function initSpeechEngine() {
+        // ========================================================
+        // CONTINUOUS SPEECH + WAKE WORD + 15S CONVERSATION WINDOW
+        // ========================================================
+        let recognition = null;
+        let isConversing = false;
+        let conversationTimer = null;
+        let countdownInterval = null;
+        let remainingSeconds = 15;
+        let shouldKeepListening = true;
+
+        const WAKE_WORDS = ["neon", "hey neon", "hi neon", "ok neon", "okay neon", "yo neon"];
+
+        function initContinuousSpeechEngine() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return false;
-            recognition = new SpeechRecognition(); recognition.continuous = false; recognition.interimResults = false; recognition.lang = 'en-US';
-            recognition.onstart = function() {
-                isListening = true; const micBtn = document.getElementById('mic-button-el');
-                micBtn.innerText = "🎙️ LISTENING..."; micBtn.style.background = "var(--accent)"; micBtn.style.color = "#fff"; micBtn.style.boxShadow = "0 0 18px var(--main)";
+            
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = function(event) {
+                if (isProcessing) return;
+
+                const lastResultIndex = event.results.length - 1;
+                const transcript = event.results[lastResultIndex][0].transcript.trim();
+                if (!transcript) return;
+
+                const lower = transcript.toLowerCase();
+
+                if (!isConversing) {
+                    // Check if wake-word exists
+                    let triggeredWakeWord = null;
+                    for (const wake of WAKE_WORDS) {
+                        if (lower.startsWith(wake)) {
+                            triggeredWakeWord = wake;
+                            break;
+                        }
+                    }
+
+                    if (triggeredWakeWord) {
+                        // Extract actual prompt after wake word
+                        let cleanPrompt = transcript.slice(triggeredWakeWord.length).replace(/^[,.\s]+/, '').trim();
+                        if (!cleanPrompt) cleanPrompt = "Hello";
+                        
+                        isConversing = true;
+                        sendMacro(cleanPrompt);
+                    }
+                } else {
+                    // Already in active 15s conversation window -> forward directly
+                    sendMacro(transcript);
+                }
             };
-            recognition.onresult = function(event) { sendMacro(event.results[0][0].transcript); };
-            recognition.onerror = function(event) { stopListeningUI(); };
-            recognition.onend = function() { stopListeningUI(); };
+
+            recognition.onerror = function(event) {
+                // Recover automatically unless abort was intentional
+                if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    console.log("Speech engine warning:", event.error);
+                }
+            };
+
+            recognition.onend = function() {
+                if (shouldKeepListening) {
+                    try { recognition.start(); } catch(e) {}
+                }
+            };
+
             return true;
         }
 
-        function stopListeningUI() {
-            isListening = false; const micBtn = document.getElementById('mic-button-el');
-            micBtn.innerText = "HOLD TO SPEAK"; micBtn.style.background = "var(--bg)"; micBtn.style.color = "var(--main)"; micBtn.style.boxShadow = "0 0 10px var(--dark)";
+        function startContinuousListening() {
+            shouldKeepListening = true;
+            if (!recognition && !initContinuousSpeechEngine()) {
+                triggerHudNotification("Speech recognition unavailable on this browser.");
+                return;
+            }
+            try { recognition.start(); } catch(e) {}
+            updateHudStateUI();
         }
 
-        function toggleMic() {
-            if (isProcessing) return;
-            if (!recognition && !initSpeechEngine()) { alert("Speech recognition not supported."); return; }
-            if (isListening) recognition.stop(); else { try { recognition.start(); } catch(e) { initSpeechEngine(); recognition.start(); } }
+        function manualMicToggle() {
+            if (!isConversing) {
+                isConversing = true;
+                startConversationCountdown();
+            } else {
+                endConversationWindow();
+            }
+        }
+
+        function startConversationCountdown() {
+            clearConversationCountdown();
+            isConversing = true;
+            remainingSeconds = 15;
+            updateHudStateUI();
+
+            countdownInterval = setInterval(() => {
+                remainingSeconds--;
+                if (remainingSeconds <= 0) {
+                    endConversationWindow();
+                } else {
+                    updateHudStateUI();
+                }
+            }, 1000);
+        }
+
+        function clearConversationCountdown() {
+            if (countdownInterval) clearInterval(countdownInterval);
+            if (conversationTimer) clearTimeout(conversationTimer);
+            countdownInterval = null;
+            conversationTimer = null;
+        }
+
+        function endConversationWindow() {
+            clearConversationCountdown();
+            isConversing = false;
+            updateHudStateUI();
+        }
+
+        function updateHudStateUI() {
+            const micBtn = document.getElementById('mic-button-el');
+            const statBox = document.getElementById('hud-stat-box-el');
+            
+            if (isProcessing) {
+                micBtn.innerText = "⏳ THINKING...";
+                micBtn.className = "mic-btn";
+                statBox.innerHTML = "STATUS: BUSY<br>MIC: PROCESSING<br>WAKE: LOCKED<br>SYS.VER: 4.8";
+            } else if (isConversing) {
+                micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
+                micBtn.className = "mic-btn conversing";
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 4.8`;
+            } else {
+                micBtn.innerText = "STANDBY (SAY 'NEON')";
+                micBtn.className = "mic-btn";
+                statBox.innerHTML = "STATUS: ONLINE<br>MIC: MONITORING<br>WAKE: 'NEON'<br>SYS.VER: 4.8";
+            }
+        }
+
+        function playAiVoiceResponse(data) {
+            clearConversationCountdown();
+            
+            if (data.audio_url && !isMuted) {
+                currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                currentAudio.onended = () => {
+                    isProcessing = false;
+                    startConversationCountdown();
+                };
+                currentAudio.onerror = () => {
+                    isProcessing = false;
+                    startConversationCountdown();
+                };
+                currentAudio.play().catch(e => {
+                    console.log("Audio playback error", e);
+                    isProcessing = false;
+                    startConversationCountdown();
+                });
+            } else if (isMuted) {
+                let synth = window.speechSynthesis;
+                let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
+                fallbackUtterance.pitch = 0.8;
+                fallbackUtterance.rate = 1.1;
+                fallbackUtterance.onend = () => {
+                    isProcessing = false;
+                    startConversationCountdown();
+                };
+                fallbackUtterance.onerror = () => {
+                    isProcessing = false;
+                    startConversationCountdown();
+                };
+                synth.speak(fallbackUtterance);
+            } else {
+                isProcessing = false;
+                startConversationCountdown();
+            }
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
 
         async function executeKeyboard() {
-            if (isProcessing) return; const text = kbString.trim(); if(text === "") { closeKeyboard(); return; }
+            if (isProcessing) return; 
+            const text = kbString.trim(); 
+            if(text === "") { closeKeyboard(); return; }
+            
             isProcessing = true;
+            clearConversationCountdown();
+            updateHudStateUI();
+
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
+            
             try {
-                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, is_muted: isMuted }) });
+                const response = await fetch('/chat', { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ message: text, is_muted: isMuted }) 
+                });
                 const data = await response.json();
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
                 
-                if (data.audio_url && !isMuted) {
-                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    currentAudio.play().catch(e => console.log("Audio error", e));
-                } else if (isMuted) {
-                    // FIXED: This will now speak using the stock device TTS even when N.E.O.N. is muted
-                    let synth = window.speechSynthesis;
-                    let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
-                    fallbackUtterance.pitch = 0.8;
-                    fallbackUtterance.rate = 1.1;
-                    synth.speak(fallbackUtterance);
-                }
+                playAiVoiceResponse(data);
             } catch (error) {
-                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
-            } finally { isProcessing = false; }
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
+                chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
+                isProcessing = false;
+                startConversationCountdown();
+            }
         }
     </script>
 </body>
@@ -618,7 +771,7 @@ def chat():
         clean_msg = user_message.lower().strip()
         cleaned_msg_stripped = re.sub(r'[^\w\s]', '', clean_msg)
         
-        if cleaned_msg_stripped in ["hello neon", "hi neon", "hey neon"]:
+        if cleaned_msg_stripped in ["hello neon", "hi neon", "hey neon", "hello"]:
             ai_response = "Hello sir."
         elif cleaned_msg_stripped in ["thank you", "thanks"]:
             ai_response = "You're welcome sir."
@@ -656,8 +809,6 @@ def chat():
         audio_path = os.path.join(STATIC_DIR, audio_filename)
         
         audio_url = None
-        # FIXED BACKEND: If muted, do NOT call ElevenLabs AT ALL (saving tokens), 
-        # but let the frontend know it can fallback to stock speech.
         if clean_text.strip() and eleven_client and not is_muted:
             try:
                 audio_generator = eleven_client.text_to_speech.convert(
