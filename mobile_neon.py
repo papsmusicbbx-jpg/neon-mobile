@@ -233,14 +233,14 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: SLEEPING<br>
                         MIC: OFFLINE<br>
-                        SYS.VER: 5.3
+                        SYS.VER: 5.6 PTT
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: #cbd5e1;">> Ready for Tap-to-Wake.</span><br>
+                        <span style="color: #cbd5e1;">> Ready for Push-to-Talk.</span><br>
                     </div>
                     <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO WAKE N.E.O.N.</div>
                 </div>
@@ -368,7 +368,7 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                updateHudStateUI(); // Do not start listening automatically
+                updateHudStateUI(); 
             }, 800);
         }
 
@@ -550,7 +550,7 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // PUSH-TO-TALK (TAP TO WAKE) + 15S CONVERSATION WINDOW
+        // PUSH-TO-TALK ONLY (TAP TO WAKE) + 15S WINDOW
         // ========================================================
         let recognition = null;
         let isConversing = false;
@@ -573,7 +573,6 @@ MOBILE_HTML = """
                 const transcript = event.results[lastResultIndex][0].transcript.trim();
                 if (!transcript) return;
 
-                // Send the captured speech directly to N.E.O.N. if we are actively conversing
                 if (isConversing) {
                     sendMacro(transcript);
                 }
@@ -586,8 +585,8 @@ MOBILE_HTML = """
             };
 
             recognition.onend = function() {
-                // ONLY RESTART IF INSIDE THE 15 SECOND CONVERSATION WINDOW
-                // Once the timer hits 0, it dies completely and silently.
+                // STRICT RULE: Only restart if we are explicitly inside the 15-second window.
+                // Otherwise, the mic stays completely OFF. No loops, no chiming.
                 if (isConversing) {
                     try { recognition.start(); } catch(e) {}
                 }
@@ -603,16 +602,16 @@ MOBILE_HTML = """
                     return;
                 }
                 
-                // Wake her up manually
+                // Wake her up manually via Tap
                 isConversing = true;
                 startConversationCountdown();
                 try { recognition.start(); } catch(e) {}
                 
-                // Send a silent greeting to trigger her audio response
+                // Send a silent greeting to trigger her audio response 
                 sendMacro("Neon");
                 
             } else {
-                // User pressed the button again to manually put her to sleep early
+                // User pressed the button again to manually sleep
                 endConversationWindow();
             }
         }
@@ -642,7 +641,7 @@ MOBILE_HTML = """
             clearConversationCountdown();
             isConversing = false;
             
-            // Stop the microphone dead in its tracks
+            // Stop the microphone completely
             if (recognition) {
                 try { recognition.stop(); } catch(e) {}
             }
@@ -656,15 +655,15 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 5.3`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 5.5 PTT`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.3`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.5 PTT`;
             } else {
                 micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 5.3`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 5.5 PTT`;
             }
         }
 
@@ -703,12 +702,19 @@ MOBILE_HTML = """
             }
 
             window.speechSynthesis.cancel();
+            window.speechSynthesis.resume(); // Kickstart stuck Android audio engines
+            
             const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
             const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
             
+            // REQUIRED FOR ANDROID TTS TO WORK RELIABLY
+            utterance.lang = 'en-US'; 
+            
             let voices = window.speechSynthesis.getVoices();
-            const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
-            if (femaleVoice) utterance.voice = femaleVoice;
+            if (voices.length > 0) {
+                const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
+                if (femaleVoice) utterance.voice = femaleVoice;
+            }
 
             utterance.pitch = 0.95;
             utterance.rate = 1.05;
@@ -717,7 +723,8 @@ MOBILE_HTML = """
                 isProcessing = false;
                 if (isConversing) startConversationCountdown();
             };
-            utterance.onerror = () => {
+            utterance.onerror = (e) => {
+                console.log("TTS Error: ", e);
                 isProcessing = false;
                 if (isConversing) startConversationCountdown();
             };
