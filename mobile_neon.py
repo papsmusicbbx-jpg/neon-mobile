@@ -180,7 +180,7 @@ MOBILE_HTML = """
         #terminal-panel { width: 68%; display: flex; flex-direction: column; padding-left: 8px; }
         #chat-box { flex-grow: 1; background: #050505; border: 1px solid var(--bg); color: #e2e8f0; padding: 10px; overflow-y: auto; font-size: 13px; margin-bottom: 8px; touch-action: pan-y; border-radius: 4px; }
         
-        .mic-btn { background: var(--bg); color: var(--main); border: 2px solid var(--accent); padding: 10px 4px; text-align: center; font-weight: bold; font-size: 12px; border-radius: 6px; box-shadow: 0 0 10px var(--dark); transition: all 0.2s ease; flex-shrink: 0; }
+        .mic-btn { background: var(--bg); color: var(--main); border: 2px solid var(--accent); padding: 10px 4px; text-align: center; font-weight: bold; font-size: 12px; border-radius: 6px; box-shadow: 0 0 10px var(--dark); transition: all 0.2s ease; flex-shrink: 0; cursor: pointer; }
         .mic-btn.conversing { background: var(--accent); color: #fff; box-shadow: 0 0 18px var(--main); animation: activeGlow 1.5s infinite alternate; }
         @keyframes activeGlow { 0% { border-color: var(--main); } 100% { border-color: #fff; } }
 
@@ -231,20 +231,18 @@ MOBILE_HTML = """
                     <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
                     <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
                     <div class="hud-stat-box" id="hud-stat-box-el">
-                        STATUS: ONLINE<br>
-                        MIC: MONITORING<br>
-                        WAKE: 'NEON'<br>
-                        SYS.VER: 5.2
+                        STATUS: SLEEPING<br>
+                        MIC: OFFLINE<br>
+                        SYS.VER: 5.3
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: var(--main);">> Autonomous voice listening active.</span><br>
-                        <span style="color: #cbd5e1;">> Say <b>"Neon"</b> or <b>"Hey Neon"</b> to start.</span><br>
+                        <span style="color: #cbd5e1;">> Ready for Tap-to-Wake.</span><br>
                     </div>
-                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">STANDBY (SAY 'NEON')</div>
+                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO WAKE N.E.O.N.</div>
                 </div>
             </div>
 
@@ -288,7 +286,7 @@ MOBILE_HTML = """
         let humGain = null;
         let isMuted = false;
 
-        // Force Android WebView to pre-load text-to-speech voices immediately
+        // Pre-load default Text-to-Speech voices for fallbacks
         if ('speechSynthesis' in window) {
             window.speechSynthesis.getVoices();
         }
@@ -370,7 +368,7 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                startContinuousListening(); // Auto-start the 24/7 background listener
+                updateHudStateUI(); // Do not start listening automatically
             }, 800);
         }
 
@@ -552,23 +550,12 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // CONTINUOUS SPEECH + WAKE WORD + 15S CONVERSATION WINDOW
+        // PUSH-TO-TALK (TAP TO WAKE) + 15S CONVERSATION WINDOW
         // ========================================================
         let recognition = null;
         let isConversing = false;
         let countdownInterval = null;
         let remainingSeconds = 15;
-        let isSystemAwake = false; 
-
-        const WAKE_PATTERNS = [
-            /^hey\s+neon/i, /^hi\s+neon/i, /^ok\s+neon/i, /^okay\s+neon/i, /^yo\s+neon/i, /^neon/i,
-            /^hey\s+neo/i, /^hi\s+neo/i, /^neo/i,
-            /^hey\s+leon/i, /^hi\s+leon/i, /^leon/i,
-            /^hey\s+n\.?e\.?o\.?n/i, /^n\.?e\.?o\.?n/i,
-            /^hey\s+kneon/i, /^kneon/i,
-            /^hey\s+meon/i, /^meon/i,
-            /^hey\s+ne\s+on/i, /^ne\s+on/i, /^wake\s+up/i
-        ];
 
         function initSpeechEngine() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -586,25 +573,8 @@ MOBILE_HTML = """
                 const transcript = event.results[lastResultIndex][0].transcript.trim();
                 if (!transcript) return;
 
-                if (!isConversing) {
-                    let matchedPattern = null;
-                    for (const pattern of WAKE_PATTERNS) {
-                        if (pattern.test(transcript)) {
-                            matchedPattern = pattern;
-                            break;
-                        }
-                    }
-
-                    if (matchedPattern) {
-                        let cleanPrompt = transcript.replace(matchedPattern, '').replace(/^[,.\s]+/, '').trim();
-                        // DEFAULT TO "NEON" IF NO SPECIFIC COMMAND IS GIVEN
-                        if (!cleanPrompt) {
-                            cleanPrompt = "Neon"; 
-                        }
-                        isConversing = true;
-                        sendMacro(cleanPrompt);
-                    }
-                } else {
+                // Send the captured speech directly to N.E.O.N. if we are actively conversing
+                if (isConversing) {
                     sendMacro(transcript);
                 }
             };
@@ -616,8 +586,9 @@ MOBILE_HTML = """
             };
 
             recognition.onend = function() {
-                // ALWAYS RESTART TO KEEP WAKE-WORD ALIVE 24/7 IN NATIVE APP
-                if (isSystemAwake) {
+                // ONLY RESTART IF INSIDE THE 15 SECOND CONVERSATION WINDOW
+                // Once the timer hits 0, it dies completely and silently.
+                if (isConversing) {
                     try { recognition.start(); } catch(e) {}
                 }
             };
@@ -625,24 +596,23 @@ MOBILE_HTML = """
             return true;
         }
 
-        function startContinuousListening() {
-            isSystemAwake = true;
-            if (!recognition && !initSpeechEngine()) {
-                triggerHudNotification("Speech recognition not supported on this device.");
-                return;
-            }
-            try { recognition.start(); } catch(e) {}
-            updateHudStateUI();
-        }
-
         function manualMicToggle() {
             if (!isConversing) {
                 if (!recognition && !initSpeechEngine()) {
-                    triggerHudNotification("Speech recognition not supported.");
+                    triggerHudNotification("Speech recognition not supported on this device.");
                     return;
                 }
+                
+                // Wake her up manually
+                isConversing = true;
                 startConversationCountdown();
+                try { recognition.start(); } catch(e) {}
+                
+                // Send a silent greeting to trigger her audio response
+                sendMacro("Neon");
+                
             } else {
+                // User pressed the button again to manually put her to sleep early
                 endConversationWindow();
             }
         }
@@ -671,6 +641,11 @@ MOBILE_HTML = """
         function endConversationWindow() {
             clearConversationCountdown();
             isConversing = false;
+            
+            // Stop the microphone dead in its tracks
+            if (recognition) {
+                try { recognition.stop(); } catch(e) {}
+            }
             updateHudStateUI();
         }
 
@@ -681,15 +656,15 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>WAKE: LOCKED<br>SYS.VER: 5.2`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 5.3`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.2`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.3`;
             } else {
-                micBtn.innerText = "STANDBY (SAY 'NEON')";
+                micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: ONLINE<br>MIC: MONITORING<br>WAKE: 'NEON'<br>SYS.VER: 5.2`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 5.3`;
             }
         }
 
@@ -704,7 +679,6 @@ MOBILE_HTML = """
             }
             
             if (data.audio_url) {
-                // Play ElevenLabs High-Quality Voice
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                 currentAudio.onended = () => {
                     isProcessing = false;
@@ -717,7 +691,6 @@ MOBILE_HTML = """
                     fallbackToDeviceSpeech(data.response);
                 });
             } else {
-                // ElevenLabs Out of Tokens / Error -> Native Android Voice
                 fallbackToDeviceSpeech(data.response);
             }
         }
@@ -733,7 +706,6 @@ MOBILE_HTML = """
             const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
             const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
             
-            // Force Android to select a female voice profile
             let voices = window.speechSynthesis.getVoices();
             const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
             if (femaleVoice) utterance.voice = femaleVoice;
