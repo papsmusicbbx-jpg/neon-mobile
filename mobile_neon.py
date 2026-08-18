@@ -8,8 +8,6 @@ from flask import Flask, request, jsonify, render_template_string, send_from_dir
 # --- AI, ELEVENLABS & GEMINI ---
 from langchain_groq import ChatGroq
 from langchain_community.tools import DuckDuckGoSearchResults
-from langchain_pinecone import PineconeVectorStore
-from langchain_core.embeddings import Embeddings
 from langchain_core.documents import Document
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -17,6 +15,10 @@ from langchain_core.messages import HumanMessage, AIMessage
 from elevenlabs.client import ElevenLabs
 from google import genai
 from google.genai import types
+
+# --- 100% LOCAL MEMORY (REPLACES PINECONE) ---
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # ==========================================
 # SECURE ENVIRONMENT SETUP
@@ -26,13 +28,12 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 if not os.path.exists(STATIC_DIR):
     os.makedirs(STATIC_DIR)
 
+# API Keys (You no longer need Pinecone!)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
-PINECONE_API_KEY = os.environ.get("PINECONE_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 VOICE_ID = "nPczCjzI2devNBz1zQrb"
-INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -40,40 +41,37 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 # Active model endpoint
 llm = ChatGroq(model="openai/gpt-oss-120b", api_key=GROQ_API_KEY, temperature=0.3)
 
-class ServerlessEmbeddings(Embeddings):
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [self.embed_query(t) for t in texts]
+# ==========================================
+# 100% LOCAL PC MEMORY CORE
+# ==========================================
+# This downloads a tiny, lightning-fast embedding model directly to your PC
+local_embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-    def embed_query(self, text: str) -> list[float]:
-        hf_token = os.environ.get("HF_TOKEN", "")
-        headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
-        url = "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction"
-        response = requests.post(url, headers=headers, json={"inputs": text, "options": {"wait_for_model": True}}, timeout=15)
-        if response.status_code != 200: raise Exception(f"HF API {response.status_code}")
-        res = response.json()
-        if isinstance(res, list) and len(res) > 0 and isinstance(res[0], list): return res[0]
-        return res
-
-embeddings = ServerlessEmbeddings()
-vector_store = PineconeVectorStore(index_name=INDEX_NAME, embedding=embeddings, pinecone_api_key=PINECONE_API_KEY)
+# This creates a physical folder on your PC to store the memories forever
+LOCAL_DB_PATH = os.path.join(BASE_DIR, "neon_local_memory")
+vector_store = Chroma(
+    collection_name="neon-memory", 
+    embedding_function=local_embeddings, 
+    persist_directory=LOCAL_DB_PATH
+)
 
 @tool
 def remember_fact(fact: str) -> str:
     """Use this tool to save important facts, preferences, or context about the user."""
     vector_store.add_documents([Document(page_content=fact)])
-    return f"Successfully saved to shared memory: {fact}"
+    return f"Successfully saved to local PC memory: {fact}"
 
 @tool
 def recall_fact(query: str) -> str:
-    """Use this tool to search long-term memory for facts, hobbies, preferences, background."""
+    """Use this tool to search local long-term memory for facts, hobbies, preferences, background."""
     results = vector_store.similarity_search(query, k=5)
-    if not results: return "No relevant memories found in database."
+    if not results: return "No relevant memories found in local database."
     return "\n".join([f"- {res.page_content}" for res in results])
 
 tools = [DuckDuckGoSearchResults(), remember_fact, recall_fact] 
 current_date = datetime.datetime.now().strftime("%A, %B %d, %Y")
 system_prompt = (
-    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile/helmet device. "
+    f"Your name is N.E.O.N. You are a highly capable AI assistant communicating with the user through their mobile/helmet/computer device. You're a female AI Agent, ready to help for whatever cause and for whatever problem finds your users way. You are a Nice, kind and a  humorous friend to everyone and especially your male user / creator , which is Manolis Papoutsakis. You will always be there for him, make him feel better at bad times, or even warn him in situations where you, as an AI, with all your knowledge think, that he is doing something wrong. You are a Human like friend to him. As a soul mate or his other half fulfilling him and his personality. "
     f"Today's date is {current_date}. Keep your answers concise, intelligent, and optimized for voice speech and small screens.\n\n"
     f"IMPORTANT AUTONOMOUS MEMORY PROTOCOL: Pay close attention to everything the user tells you during conversation. "
     f"If the user shares any personal preference, fact, plan, project, detail, or important piece of information about themselves "
@@ -85,6 +83,7 @@ chat_history = []
 
 app = Flask(__name__)
 
+# [HTML REMAINS EXACTLY THE SAME - WEBRTC WALKIE TALKIE]
 MOBILE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -233,15 +232,16 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: ONLINE<br>
                         MIC: STANDBY<br>
-                        SYS.VER: 9.0 (PTT)
+                        MEM: LOCAL_HOST<br>
+                        SYS.VER: 10.0
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: #cbd5e1;">> Native hardware bridge connected.</span><br>
-                        <span style="color: #cbd5e1;">> Ready for input.</span><br>
+                        <span style="color: var(--accent);">> LOCAL MEMORY CORE CONNECTED.</span><br>
+                        <span style="color: #cbd5e1;">> Ready for Push-To-Talk input.</span><br>
                     </div>
                     <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO WAKE N.E.O.N.</div>
                 </div>
@@ -281,220 +281,127 @@ MOBILE_HTML = """
     </div>
 
     <script>
-        // --- WEB AUDIO API ENGINE ---
         let audioCtx = null;
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
 
-        // Force voice pre-load for Chrome browser fallback
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.getVoices();
-            window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
-        }
-
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            
             if (!humOsc) {
                 humOsc = audioCtx.createOscillator();
                 humOsc.type = 'triangle';
                 humOsc.frequency.setValueAtTime(55, audioCtx.currentTime); 
-                
                 const filter = audioCtx.createBiquadFilter();
                 filter.type = 'lowpass';
                 filter.frequency.value = 300;
-
                 humGain = audioCtx.createGain();
                 humGain.gain.setValueAtTime(isMuted ? 0 : 0.03, audioCtx.currentTime); 
-                
-                humOsc.connect(filter);
-                filter.connect(humGain);
-                humGain.connect(audioCtx.destination);
+                humOsc.connect(filter); filter.connect(humGain); humGain.connect(audioCtx.destination);
                 humOsc.start();
             }
         }
 
         function playCyberClick() {
             if(!audioCtx || audioCtx.state === 'suspended' || isMuted) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.03);
-            
-            gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
-            
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.03);
+            gain.gain.setValueAtTime(0.04, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+            osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.03);
         }
 
         function playBootSound() {
             if(!audioCtx || isMuted) return;
-            const osc = audioCtx.createOscillator();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.6);
-            
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(200, audioCtx.currentTime);
-            filter.frequency.exponentialRampToValueAtTime(3000, audioCtx.currentTime + 0.6);
-            
-            const gain = audioCtx.createGain();
-            gain.gain.setValueAtTime(0, audioCtx.currentTime);
-            gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.1);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
-            
-            osc.connect(filter);
-            filter.connect(gain);
-            gain.connect(audioCtx.destination);
-            
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.6);
+            const osc = audioCtx.createOscillator(); const filter = audioCtx.createBiquadFilter(); const gain = audioCtx.createGain();
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.6);
+            filter.type = 'lowpass'; filter.frequency.setValueAtTime(200, audioCtx.currentTime); filter.frequency.exponentialRampToValueAtTime(3000, audioCtx.currentTime + 0.6);
+            gain.gain.setValueAtTime(0, audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.1); gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+            osc.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.6);
         }
 
-        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
 
         function unlockTerminal() {
-            initAudio();
-            playBootSound();
-            
+            initAudio(); playBootSound();
+            if ('speechSynthesis' in window) { let warmup = new SpeechSynthesisUtterance(''); warmup.volume = 0; window.speechSynthesis.speak(warmup); }
             bootScreen.style.opacity = '0';
-            setTimeout(() => {
-                bootScreen.style.display = 'none';
-                viewport.style.opacity = '1';
-                updateStatusUI(); 
-            }, 800);
+            setTimeout(() => { bootScreen.style.display = 'none'; viewport.style.opacity = '1'; updateStatusUI(); }, 800);
         }
 
         bootScreen.addEventListener('touchend', function(e) {
-            let currentTime = new Date().getTime();
-            let tapLength = currentTime - lastTap;
-            if (tapLength < 500 && tapLength > 0) { unlockTerminal(); e.preventDefault(); }
-            lastTap = currentTime;
+            let currentTime = new Date().getTime(); let tapLength = currentTime - lastTap;
+            if (tapLength < 500 && tapLength > 0) { unlockTerminal(); e.preventDefault(); } lastTap = currentTime;
         });
         bootScreen.addEventListener('dblclick', unlockTerminal);
 
         document.addEventListener('click', (e) => {
             if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-            if(e.target.closest('.cmd-btn') || e.target.closest('.kb-key') || e.target.closest('.mic-btn')) {
-                playCyberClick();
-            }
+            if(e.target.closest('.cmd-btn') || e.target.closest('.kb-key') || e.target.closest('.mic-btn')) { playCyberClick(); }
         });
 
-        // HUD SWIPE LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
-        function goToScreen(screenIndex) {
-            currentScreen = Math.max(0, Math.min(1, screenIndex));
-            appContainer.style.transform = `translateX(-${currentScreen * 100}vw)`;
-        }
-
-        function handleSwipe() {
-            const diffX = touchendX - touchstartX;
-            if (diffX < -40) goToScreen(1);
-            else if (diffX > 40) goToScreen(0);
-        }
-
+        function goToScreen(screenIndex) { currentScreen = Math.max(0, Math.min(1, screenIndex)); appContainer.style.transform = `translateX(-${currentScreen * 100}vw)`; }
+        function handleSwipe() { const diffX = touchendX - touchstartX; if (diffX < -40) goToScreen(1); else if (diffX > 40) goToScreen(0); }
         document.addEventListener('touchstart', e => { touchstartX = e.changedTouches[0].screenX; }, { passive: true });
         document.addEventListener('touchend', e => { touchendX = e.changedTouches[0].screenX; handleSwipe(); }, { passive: true });
-        document.addEventListener('touchmove', function(e) {
-            if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); }
-        }, { passive: false });
+        document.addEventListener('touchmove', function(e) { if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); } }, { passive: false });
 
-        // KEYBOARD & INPUT STATE
         let kbString = ""; let isProcessing = false; let currentAudio = null;
-        const kbDisplay = document.getElementById('kb-text');
-        const kbOverlay = document.getElementById('keyboard-overlay');
-        const chatBox = document.getElementById('chat-box');
+        const kbDisplay = document.getElementById('kb-text'); const kbOverlay = document.getElementById('keyboard-overlay'); const chatBox = document.getElementById('chat-box');
 
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
-        
         function typeChar(char) { kbString += char; updateKbDisplay(); }
         function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
-        
-        function updateKbDisplay() { 
-            kbDisplay.innerText = kbString + "_"; 
-            const displayEl = document.getElementById('kb-input-display');
-            displayEl.scrollLeft = displayEl.scrollWidth; 
-        }
+        function updateKbDisplay() { kbDisplay.innerText = kbString + "_"; document.getElementById('kb-input-display').scrollLeft = document.getElementById('kb-input-display').scrollWidth; }
 
         function triggerHudNotification(message) {
-            const toast = document.getElementById('hud-toast');
-            document.getElementById('toast-text-el').innerText = message;
+            const toast = document.getElementById('hud-toast'); document.getElementById('toast-text-el').innerText = message;
             toast.classList.add('show');
             if (toastTimeout) clearTimeout(toastTimeout);
             toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, 4000);
         }
 
         function toggleMute() {
-            isMuted = !isMuted;
-            const muteBtn = document.getElementById('mute-btn');
+            isMuted = !isMuted; const muteBtn = document.getElementById('mute-btn');
             if (isMuted) {
-                muteBtn.innerText = "🔊 Unmute"; 
-                muteBtn.style.background = "var(--dark)";
+                muteBtn.innerText = "🔊 Unmute"; muteBtn.style.background = "var(--dark)";
                 if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
-                
-                if (window.AndroidTTS) { window.AndroidTTS.stop(); }
-                else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
-                
+                if (window.AndroidTTS) { window.AndroidTTS.stop(); } else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
                 if (humGain && audioCtx) humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
                 triggerHudNotification("Audio muted (Text-only mode).");
             } else {
-                muteBtn.innerText = "🔇 Mute"; 
-                muteBtn.style.background = "#14060d";
+                muteBtn.innerText = "🔇 Mute"; muteBtn.style.background = "#14060d";
                 if (humGain && audioCtx) humGain.gain.setTargetAtTime(0.03, audioCtx.currentTime, 0.1);
                 triggerHudNotification("Audio enabled (Speech active).");
             }
         }
 
         function loadCustomMacros() {
-            const saved = localStorage.getItem('neon_custom_macros');
-            if (!saved) return;
-            try {
-                const macros = JSON.parse(saved);
-                const container = document.getElementById('macro-grid-container');
-                macros.forEach(m => {
-                    const btn = document.createElement('div');
-                    btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = m.name; btn.onclick = () => sendMacro(m.prompt);
-                    container.appendChild(btn);
-                });
-            } catch(e) {}
+            const saved = localStorage.getItem('neon_custom_macros'); if (!saved) return;
+            try { JSON.parse(saved).forEach(m => { const btn = document.createElement('div'); btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = m.name; btn.onclick = () => sendMacro(m.prompt); document.getElementById('macro-grid-container').appendChild(btn); }); } catch(e) {}
         }
-
         function openMacroBuilder() {
-            const name = prompt("Enter button label (e.g., ⚡ Status):"); if (!name) return;
-            const promptText = prompt("Enter the command prompt for N.E.O.N.:"); if (!promptText) return;
-            let macros = [];
-            const saved = localStorage.getItem('neon_custom_macros');
+            const name = prompt("Enter button label:"); if (!name) return;
+            const promptText = prompt("Enter the command prompt:"); if (!promptText) return;
+            let macros = []; const saved = localStorage.getItem('neon_custom_macros');
             if (saved) { try { macros = JSON.parse(saved); } catch(e) {} }
-            macros.push({ name: name, prompt: promptText });
-            localStorage.setItem('neon_custom_macros', JSON.stringify(macros));
-            const container = document.getElementById('macro-grid-container');
-            const btn = document.createElement('div'); btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = name; btn.onclick = () => sendMacro(promptText);
-            container.appendChild(btn);
+            macros.push({ name: name, prompt: promptText }); localStorage.setItem('neon_custom_macros', JSON.stringify(macros));
+            const btn = document.createElement('div'); btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = name; btn.onclick = () => sendMacro(promptText); document.getElementById('macro-grid-container').appendChild(btn);
             triggerHudNotification(`Macro '${name}' compiled.`);
         }
-
         window.addEventListener('DOMContentLoaded', () => { loadCustomMacros(); });
         
-        function triggerMobileCamera() {
-            if (isProcessing) return; document.getElementById('camera-file-input').click();
-        }
+        function triggerMobileCamera() { if (isProcessing) return; document.getElementById('camera-file-input').click(); }
 
         function handleCameraCapture(event) {
-            const file = event.target.files[0]; if (!file) return;
-            const reader = new FileReader();
+            const file = event.target.files[0]; if (!file) return; const reader = new FileReader();
             reader.onload = function(e) {
                 const img = new Image();
                 img.onload = function() {
@@ -508,102 +415,98 @@ MOBILE_HTML = """
             reader.readAsDataURL(file); event.target.value = ''; 
         }
 
-        // ========================================================
-        // PURE PUSH-TO-TALK LOGIC (WALKIE-TALKIE MODE)
-        // ========================================================
-        let recognition = null;
-        let isListening = false;
-
-        function initSpeechEngine() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) return false;
-            
-            recognition = new SpeechRecognition();
-            // PURE WALKIE-TALKIE: Automatically turns off when you stop talking.
-            recognition.continuous = false; 
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
-
-            recognition.onresult = function(event) {
-                const lastResultIndex = event.results.length - 1;
-                const transcript = event.results[lastResultIndex][0].transcript.trim();
-                if (transcript) {
-                    // Instantly kill the mic so she can speak
-                    isListening = false;
-                    if (recognition) { try { recognition.stop(); } catch(e) {} }
-                    sendMacro(transcript);
-                }
-            };
-
-            recognition.onerror = function(event) {
-                console.log("Speech error:", event.error);
-            };
-
-            recognition.onend = function() {
-                isListening = false;
-                updateStatusUI();
-            };
-
-            return true;
-        }
-
-        function manualMicToggle() {
-            if (isProcessing) return; // Prevent interrupting if she is already thinking/speaking
-            
-            if (isListening) {
-                // Manually force mic off early
-                isListening = false;
-                if (recognition) { try { recognition.stop(); } catch(e) {} }
-                updateStatusUI();
-            } else {
-                // Open mic to listen
-                if (!recognition) initSpeechEngine();
-                try { recognition.start(); } catch(e) {}
-                isListening = true;
-                updateStatusUI();
-            }
-        }
-
         function updateStatusUI() {
             const micBtn = document.getElementById('mic-button-el');
             const statBox = document.getElementById('hud-stat-box-el');
             
             if (isProcessing) {
-                micBtn.innerText = "⏳ THINKING...";
-                micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 9.0 (PTT)`;
+                micBtn.innerText = "⏳ THINKING..."; micBtn.className = "mic-btn";
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 10.0 (LOCAL MEM)`;
             } else if (isListening) {
-                micBtn.innerText = "🎙️ LISTENING...";
-                micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE<br>SYS.VER: 9.0 (PTT)`;
+                micBtn.innerText = "🎙️ LISTENING (TAP TO SEND)"; micBtn.className = "mic-btn conversing";
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: RECORDING<br>SYS.VER: 10.0 (LOCAL MEM)`;
             } else {
-                micBtn.innerText = "TAP TO WAKE N.E.O.N.";
-                micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: ONLINE<br>MIC: STANDBY<br>SYS.VER: 9.0 (PTT)`;
+                micBtn.innerText = "TAP TO WAKE N.E.O.N."; micBtn.className = "mic-btn";
+                statBox.innerHTML = `STATUS: ONLINE<br>MIC: STANDBY<br>SYS.VER: 10.0 (LOCAL MEM)`;
             }
         }
 
         // ========================================================
-        // ISOLATED TEXT-TO-SPEECH LOGIC
+        // WEBRTC WHISPER AUDIO RECORDING (REPLACES SPEECHRECOGNITION)
         // ========================================================
-        
-        // This function is triggered by Android Kotlin when she finishes her native sentence!
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isListening = false;
+        let activeStream = null;
+
+        async function startRecording() {
+            try {
+                activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(activeStream, { mimeType: 'audio/webm' });
+                
+                mediaRecorder.ondataavailable = e => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+                
+                mediaRecorder.onstop = () => {
+                    if (activeStream) activeStream.getTracks().forEach(track => track.stop());
+                    
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    audioChunks = [];
+                    
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioBlob);
+                    reader.onloadend = () => {
+                        executeAudioBuffer(reader.result);
+                    };
+                };
+                
+                mediaRecorder.start();
+                isListening = true;
+                updateStatusUI();
+            } catch (err) {
+                triggerHudNotification("Mic permission denied or not supported.");
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                isListening = false;
+                updateStatusUI();
+            }
+        }
+
+        function manualMicToggle() {
+            if (isProcessing) return;
+            if (isListening) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+
         function finishProcessing() {
             isProcessing = false;
             updateStatusUI();
         }
         
         function playAiVoiceResponse(data) {
-            if (isMuted) {
-                finishProcessing();
-                return;
-            }
+            if (isMuted) { finishProcessing(); return; }
             
             if (data.audio_url) {
-                triggerHudNotification("Playing ElevenLabs audio...");
+                // TELL ANDROID KOTLIN TO DUCK MUSIC FOR ELEVENLABS
+                if (window.AndroidTTS) { window.AndroidTTS.duckAudio(); }
+                
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                currentAudio.onended = finishProcessing;
-                currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
+                currentAudio.onended = () => {
+                    if (window.AndroidTTS) { window.AndroidTTS.releaseAudio(); }
+                    finishProcessing();
+                };
+                currentAudio.onerror = () => {
+                    if (window.AndroidTTS) { window.AndroidTTS.releaseAudio(); }
+                    fallbackToDeviceSpeech(data.response);
+                };
                 currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
             } else {
                 fallbackToDeviceSpeech(data.response);
@@ -613,68 +516,48 @@ MOBILE_HTML = """
         function fallbackToDeviceSpeech(textResponse) {
             const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
 
-            // --- THE NATIVE ANDROID BRIDGE ---
             if (window.AndroidTTS) {
+                // Native Kotlin STT (Automatically ducks via the logic we wrote in Android Studio)
                 window.AndroidTTS.speak(cleanSpokenText);
                 return; 
             }
 
-            // --- THE PC / CHROME FALLBACK ---
-            if (!('speechSynthesis' in window)) {
-                triggerHudNotification("Device TTS not supported.");
-                finishProcessing();
-                return;
-            }
-            triggerHudNotification("Using browser offline backup voice.");
+            if (!('speechSynthesis' in window)) { finishProcessing(); return; }
             window.speechSynthesis.cancel();
-            
             setTimeout(() => {
                 window.__neonBackupVoice = new SpeechSynthesisUtterance(cleanSpokenText);
                 window.__neonBackupVoice.lang = 'en-US'; 
-                window.__neonBackupVoice.onend = finishProcessing;
-                window.__neonBackupVoice.onerror = finishProcessing;
+                window.__neonBackupVoice.onend = finishProcessing; window.__neonBackupVoice.onerror = finishProcessing;
                 window.speechSynthesis.speak(window.__neonBackupVoice);
             }, 50);
         }
 
         function sendMacro(text) { 
             if (isProcessing) return; 
-            
-            // ALWAYS force kill mic before talking to server to free audio channel
-            isListening = false;
-            if (recognition) { try { recognition.stop(); } catch(e) {} }
-            
+            if (isListening) stopRecording();
             kbString = text; 
             executeKeyboard(); 
         }
 
-        async function executeKeyboard() {
-            if (isProcessing) return; 
-            const text = kbString.trim(); 
-            if(text === "") { closeKeyboard(); return; }
-            
+        async function executeAudioBuffer(base64Audio) {
             isProcessing = true;
             updateStatusUI();
 
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if (window.AndroidTTS) { window.AndroidTTS.stop(); }
-            else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+            if (window.AndroidTTS) { window.AndroidTTS.stop(); } else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
 
-            chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
+            chatBox.innerHTML += `<br>> <b>User:</b> 🎙️ [Voice transmission]`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
-            kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
             
             try {
-                const response = await fetch('/chat', { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' }, 
-                    body: JSON.stringify({ message: text, is_muted: isMuted }) 
-                });
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audio: base64Audio, is_muted: isMuted }) });
                 const data = await response.json();
                 
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
+                if (data.user_text) {
+                    chatBox.innerHTML += `<br>> <span style="color: #cbd5e1;">[Transcribed]: "${data.user_text}"</span>`;
+                }
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
-                
                 playAiVoiceResponse(data);
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
@@ -682,32 +565,29 @@ MOBILE_HTML = """
                 finishProcessing();
             }
         }
-        
-        async function sendImageToNeon(base64Image) {
-            if (isProcessing) return; 
-            
-            isListening = false;
-            if (recognition) { try { recognition.stop(); } catch(e) {} }
-            
-            isProcessing = true;
-            updateStatusUI();
 
-            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if (window.AndroidTTS) { window.AndroidTTS.stop(); }
-            else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+        async function executeKeyboard() {
+            if (isProcessing) return; 
+            const text = kbString.trim(); 
+            if(text === "") { closeKeyboard(); return; }
             
-            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
-            const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
-            goToScreen(0); 
+            isProcessing = true; updateStatusUI();
+            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
+            if (window.AndroidTTS) { window.AndroidTTS.stop(); } else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+
+            chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
+            const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
+            kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
+            
             try {
-                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "Describe what you see in this picture concise and clearly.", image: base64Image, is_muted: isMuted }) });
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, is_muted: isMuted }) });
                 const data = await response.json();
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
-                
                 playAiVoiceResponse(data);
             } catch (error) {
-                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
+                chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
                 finishProcessing();
             }
         }
@@ -725,10 +605,32 @@ def serve_static(filename): return send_from_directory(STATIC_DIR, filename)
 def chat():
     global chat_history
     user_message = request.json.get("message", "")
+    audio_b64 = request.json.get("audio", None)
     image_b64 = request.json.get("image", None)
     is_muted = request.json.get("is_muted", False)
+    user_transcription = None
+    
     try:
         ai_response = None
+        
+        # --- GROQ WHISPER WEBRTC TRANSCRIPTION ---
+        if audio_b64:
+            clean_b64 = audio_b64.split(",")[-1] if "," in audio_b64 else audio_b64
+            audio_bytes = base64.b64decode(clean_b64)
+            
+            files = {'file': ('audio.webm', audio_bytes, 'audio/webm')}
+            data = {'model': 'whisper-large-v3'}
+            headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+            resp = requests.post('https://api.groq.com/openai/v1/audio/transcriptions', headers=headers, files=files, data=data)
+            
+            if resp.status_code == 200:
+                user_message = resp.json().get('text', '').strip()
+                user_transcription = user_message
+            else:
+                return jsonify({"response": "I had trouble processing the audio feed.", "audio_url": None, "user_text": None})
+                
+            if not user_message:
+                return jsonify({"response": "Audio feed empty. Awaiting input.", "audio_url": None, "user_text": None})
         
         # --- QUICK ACKNOWLEDGMENT OVERRIDES (Instant, 0 Tokens) ---
         clean_msg = user_message.lower().strip()
@@ -782,13 +684,11 @@ def chat():
                         if chunk: f.write(chunk)
                 audio_url = f"/static/{audio_filename}?v=1"
             except Exception as e:
-                # Quota exceeded or error -> return None so frontend triggers device female TTS
                 audio_url = None
 
-        return jsonify({"response": ai_response.replace('\n', '<br>'), "audio_url": audio_url})
+        return jsonify({"response": ai_response.replace('\n', '<br>'), "audio_url": audio_url, "user_text": user_transcription})
     except Exception as e:
-        return jsonify({"response": f"System Error: {str(e)}", "audio_url": None})
+        return jsonify({"response": f"System Error: {str(e)}", "audio_url": None, "user_text": None})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=5000)
