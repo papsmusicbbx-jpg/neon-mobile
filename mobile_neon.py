@@ -211,149 +211,7 @@ MOBILE_HTML = """
 </head>
 <body>
 
-    <!-- BOOT SCREEN -->
-    <div id="boot-screen">
-        <div class="boot-logo">N.E.O.N.</div>
-        <div class="boot-subtext">DOUBLE TAP TO INITIALIZE</div>
-    </div>
-
-    <div id="hud-toast">
-        <div class="toast-title">⚡ N.E.O.N. // SYSTEM ALERT</div>
-        <div class="toast-body" id="toast-text-el">Neural notification link established.</div>
-    </div>
-
-    <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none;" onchange="handleCameraCapture(event)">
-
-    <div id="viewport-wrapper">
-        <div id="app-container">
-            <div id="screen-chat" class="screen">
-                <div id="avatar-panel">
-                    <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
-                    <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
-                    <div class="hud-stat-box" id="hud-stat-box-el">
-                        STATUS: ONLINE<br>
-                        AUDIO: UNMUTED<br>
-                        MIC: STANDBY<br>
-                        SYS.VER: 5.0
-                    </div>
-                    <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
-                </div>
-                <div id="terminal-panel">
-                    <div id="chat-box">
-                        <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: var(--main);">> Voice engine initialized (Unmuted).</span><br>
-                        <span style="color: #cbd5e1;">> Say <b>"Neon"</b> or tap the button to speak.</span><br>
-                    </div>
-                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO SPEAK / SAY "NEON"</div>
-                </div>
-            </div>
-
-            <div id="screen-commands" class="screen">
-                <div style="color: var(--main); font-weight: bold; margin-bottom: 6px; font-size: 11px;">
-                    <span style="float: left;" onclick="goToScreen(0)">← SWIPE RIGHT</span> &nbsp;&nbsp;&nbsp;COMMAND DECK // MACROS
-                </div>
-                <div class="grid-container" id="macro-grid-container">
-                    <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ OPEN TACTICAL KEYBOARD ]</div>
-                    <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
-                    <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
-                    <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
-                    <div class="cmd-btn" id="mute-btn" onclick="toggleMute()">🔇 Mute</div>
-                    <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
-                    <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
-                    <div class="cmd-btn" onclick="triggerHudNotification('Neural link verified. HUD alert active.')">🔔 Notify</div>
-                    <div class="cmd-btn" onclick="openMacroBuilder()" style="background: var(--bg); color: #fff;">➕ Add Macro</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TACTICAL KEYBOARD OVERLAY -->
-    <div id="keyboard-overlay">
-        <div id="kb-input-display"><span id="kb-text">_</span></div>
-        <div id="kb-grid">
-            <div class="kb-key" onclick="typeChar('Q')">Q</div><div class="kb-key" onclick="typeChar('W')">W</div><div class="kb-key" onclick="typeChar('E')">E</div><div class="kb-key" onclick="typeChar('R')">R</div><div class="kb-key" onclick="typeChar('T')">T</div><div class="kb-key" onclick="typeChar('Y')">Y</div><div class="kb-key" onclick="typeChar('U')">U</div><div class="kb-key" onclick="typeChar('I')">I</div><div class="kb-key" onclick="typeChar('O')">O</div><div class="kb-key" onclick="typeChar('P')">P</div>
-            <div class="kb-key" onclick="typeChar('A')">A</div><div class="kb-key" onclick="typeChar('S')">S</div><div class="kb-key" onclick="typeChar('D')">D</div><div class="kb-key" onclick="typeChar('F')">F</div><div class="kb-key" onclick="typeChar('G')">G</div><div class="kb-key" onclick="typeChar('H')">H</div><div class="kb-key" onclick="typeChar('J')">J</div><div class="kb-key" onclick="typeChar('K')">K</div><div class="kb-key" onclick="typeChar('L')">L</div><div class="kb-key kb-wide" onclick="backspace()">⌫</div>
-            <div class="kb-key" onclick="typeChar('Z')">Z</div><div class="kb-key" onclick="typeChar('X')">X</div><div class="kb-key" onclick="typeChar('C')">C</div><div class="kb-key" onclick="typeChar('V')">V</div><div class="kb-key" onclick="typeChar('B')">B</div><div class="kb-key" onclick="typeChar('N')">N</div><div class="kb-key" onclick="typeChar('M')">M</div><div class="kb-key" onclick="typeChar('?')">?</div><div class="kb-key" onclick="typeChar('/')">/</div>
-            <div class="kb-key kb-close" onclick="closeKeyboard()">CLOSE</div>
-            <div class="kb-key" onclick="typeChar('.')">.</div>
-            <div class="kb-key kb-space" onclick="typeChar(' ')">SPACE</div>
-            <div class="kb-key kb-exec" onclick="executeKeyboard()">[ EXECUTE ]</div>
-        </div>
-    </div>
-
-    <script>
-        // --- WEB AUDIO API ENGINE ---
-        let audioCtx = null;
-        let humOsc = null;
-        let humGain = null;
-        let isMuted = false; // Starts UNMUTED by default
-
-        function initAudio() {
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            
-            if (!humOsc) {
-                humOsc = audioCtx.createOscillator();
-                humOsc.type = 'triangle';
-                humOsc.frequency.setValueAtTime(55, audioCtx.currentTime); 
-                
-                const filter = audioCtx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 300;
-
-                humGain = audioCtx.createGain();
-                humGain.gain.setValueAtTime(isMuted ? 0 : 0.03, audioCtx.currentTime); 
-                
-                humOsc.connect(filter);
-                filter.connect(humGain);
-                humGain.connect(audioCtx.destination);
-                humOsc.start();
-            }
-        }
-
-        function playCyberClick() {
-            if(!audioCtx || audioCtx.state === 'suspended' || isMuted) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.03);
-            
-            gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
-            
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.03);
-        }
-
-        function playBootSound() {
-            if(!audioCtx || isMuted) return;
-            const osc = audioCtx.createOscillator();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.6);
-            
-            const filter = audioCtx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(200, audioCtx.currentTime);
-            filter.frequency.exponentialRampToValueAtTime(3000, audioCtx.currentTime + 0.6);
-            
-            const gain = audioCtx.createGain();
-            gain.gain.setValueAtTime(0, audioCtx.currentTime);
-            gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.1);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
-            
-            osc.connect(filter);
-            filter.connect(gain);
-            gain.connect(audioCtx.destination);
-            
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.6);
-        }
-
-        // BOOT SCREEN LOGIC
+// BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -365,7 +223,12 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                initSpeechEngine();
+                
+                // FIXED: Start continuous background listening immediately on boot
+                if (!recognition) initSpeechEngine();
+                isSystemAwake = true;
+                try { recognition.start(); } catch(e) {}
+                updateHudStateUI();
             }, 800);
         }
 
@@ -548,23 +411,22 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // ENHANCED SPEECH RECOGNITION & ROBUST WAKE PHRASES
+        // ENHANCED SPEECH RECOGNITION (ALWAYS ON STANDBY)
         // ========================================================
         let recognition = null;
         let isConversing = false;
         let countdownInterval = null;
         let remainingSeconds = 15;
-        let shouldKeepListening = false;
+        let isSystemAwake = false; // Controls if mic should loop forever
 
-        // Expanded phonetic matches for how browsers transcribe "Neon"
         const WAKE_PATTERNS = [
-            /^hey\\s+neon/i, /^hi\\s+neon/i, /^ok\\s+neon/i, /^okay\\s+neon/i, /^yo\\s+neon/i, /^neon/i,
-            /^hey\\s+neo/i, /^hi\\s+neo/i, /^neo/i,
-            /^hey\\s+leon/i, /^hi\\s+leon/i, /^leon/i,
-            /^hey\\s+n\\.?e\\.?o\\.?n/i, /^n\\.?e\\.?o\\.?n/i,
-            /^hey\\s+kneon/i, /^kneon/i,
-            /^hey\\s+meon/i, /^meon/i,
-            /^hey\\s+ne\\s+on/i, /^ne\\s+on/i
+            /^hey\s+neon/i, /^hi\s+neon/i, /^ok\s+neon/i, /^okay\s+neon/i, /^yo\s+neon/i, /^neon/i,
+            /^hey\s+neo/i, /^hi\s+neo/i, /^neo/i,
+            /^hey\s+leon/i, /^hi\s+leon/i, /^leon/i,
+            /^hey\s+n\.?e\.?o\.?n/i, /^n\.?e\.?o\.?n/i,
+            /^hey\s+kneon/i, /^kneon/i,
+            /^hey\s+meon/i, /^meon/i,
+            /^hey\s+ne\s+on/i, /^ne\s+on/i
         ];
 
         function initSpeechEngine() {
@@ -584,7 +446,6 @@ MOBILE_HTML = """
                 if (!transcript) return;
 
                 if (!isConversing) {
-                    // Check wake patterns
                     let matchedPattern = null;
                     for (const pattern of WAKE_PATTERNS) {
                         if (pattern.test(transcript)) {
@@ -596,13 +457,12 @@ MOBILE_HTML = """
                     if (matchedPattern) {
                         let cleanPrompt = transcript.replace(matchedPattern, '').replace(/^[,.\s]+/, '').trim();
                         if (!cleanPrompt) {
-                            cleanPrompt = "Neon"; // Trigger quick acknowledgment
+                            cleanPrompt = "Neon"; 
                         }
                         isConversing = true;
                         sendMacro(cleanPrompt);
                     }
                 } else {
-                    // Inside 15s window: Send whatever is spoken
                     sendMacro(transcript);
                 }
             };
@@ -614,10 +474,9 @@ MOBILE_HTML = """
             };
 
             recognition.onend = function() {
-                if (shouldKeepListening && isConversing) {
+                // FIXED: ALWAYS restart the mic to keep standby mode alive 24/7
+                if (isSystemAwake) {
                     try { recognition.start(); } catch(e) {}
-                } else {
-                    endConversationWindow();
                 }
             };
 
@@ -630,9 +489,7 @@ MOBILE_HTML = """
                     triggerHudNotification("Speech recognition not supported on this browser.");
                     return;
                 }
-                shouldKeepListening = true;
                 startConversationCountdown();
-                try { recognition.start(); } catch(e) {}
             } else {
                 endConversationWindow();
             }
@@ -641,13 +498,8 @@ MOBILE_HTML = """
         function startConversationCountdown() {
             clearConversationCountdown();
             isConversing = true;
-            shouldKeepListening = true;
             remainingSeconds = 15;
             updateHudStateUI();
-
-            if (recognition) {
-                try { recognition.start(); } catch(e) {}
-            }
 
             countdownInterval = setInterval(() => {
                 remainingSeconds--;
@@ -667,10 +519,7 @@ MOBILE_HTML = """
         function endConversationWindow() {
             clearConversationCountdown();
             isConversing = false;
-            shouldKeepListening = false;
-            if (recognition) {
-                try { recognition.stop(); } catch(e) {}
-            }
+            // FIXED: Do NOT stop the mic. Just go back to passive standby state.
             updateHudStateUI();
         }
 
