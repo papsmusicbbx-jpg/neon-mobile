@@ -234,7 +234,7 @@ MOBILE_HTML = """
                         STATUS: ONLINE<br>
                         MIC: MONITORING<br>
                         WAKE: 'NEON'<br>
-                        SYS.VER: 5.0
+                        SYS.VER: 5.2
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -287,6 +287,11 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
+
+        // Force Android WebView to pre-load text-to-speech voices immediately
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+        }
 
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -365,7 +370,7 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                startContinuousListening(); // Start the Wake-Word loop automatically
+                startContinuousListening(); // Auto-start the 24/7 background listener
             }, 800);
         }
 
@@ -547,7 +552,7 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // ENHANCED SPEECH RECOGNITION (ALWAYS ON STANDBY)
+        // CONTINUOUS SPEECH + WAKE WORD + 15S CONVERSATION WINDOW
         // ========================================================
         let recognition = null;
         let isConversing = false;
@@ -562,7 +567,7 @@ MOBILE_HTML = """
             /^hey\s+n\.?e\.?o\.?n/i, /^n\.?e\.?o\.?n/i,
             /^hey\s+kneon/i, /^kneon/i,
             /^hey\s+meon/i, /^meon/i,
-            /^hey\s+ne\s+on/i, /^ne\s+on/i
+            /^hey\s+ne\s+on/i, /^ne\s+on/i, /^wake\s+up/i
         ];
 
         function initSpeechEngine() {
@@ -592,7 +597,7 @@ MOBILE_HTML = """
 
                     if (matchedPattern) {
                         let cleanPrompt = transcript.replace(matchedPattern, '').replace(/^[,.\s]+/, '').trim();
-                        // FIXED: Now defaults to "Neon" so she replies "Sir." instead of "Hello".
+                        // DEFAULT TO "NEON" IF NO SPECIFIC COMMAND IS GIVEN
                         if (!cleanPrompt) {
                             cleanPrompt = "Neon"; 
                         }
@@ -611,6 +616,7 @@ MOBILE_HTML = """
             };
 
             recognition.onend = function() {
+                // ALWAYS RESTART TO KEEP WAKE-WORD ALIVE 24/7 IN NATIVE APP
                 if (isSystemAwake) {
                     try { recognition.start(); } catch(e) {}
                 }
@@ -622,7 +628,7 @@ MOBILE_HTML = """
         function startContinuousListening() {
             isSystemAwake = true;
             if (!recognition && !initSpeechEngine()) {
-                triggerHudNotification("Speech recognition not supported on this browser.");
+                triggerHudNotification("Speech recognition not supported on this device.");
                 return;
             }
             try { recognition.start(); } catch(e) {}
@@ -672,19 +678,18 @@ MOBILE_HTML = """
             const micBtn = document.getElementById('mic-button-el');
             const statBox = document.getElementById('hud-stat-box-el');
             
-            // FIXED: Removed the AUDIO: UNMUTED text to restore your original clean layout.
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>WAKE: LOCKED<br>SYS.VER: 5.0`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>WAKE: LOCKED<br>SYS.VER: 5.2`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.0`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.2`;
             } else {
                 micBtn.innerText = "STANDBY (SAY 'NEON')";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: ONLINE<br>MIC: MONITORING<br>WAKE: 'NEON'<br>SYS.VER: 5.0`;
+                statBox.innerHTML = `STATUS: ONLINE<br>MIC: MONITORING<br>WAKE: 'NEON'<br>SYS.VER: 5.2`;
             }
         }
 
@@ -699,6 +704,7 @@ MOBILE_HTML = """
             }
             
             if (data.audio_url) {
+                // Play ElevenLabs High-Quality Voice
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                 currentAudio.onended = () => {
                     isProcessing = false;
@@ -711,6 +717,7 @@ MOBILE_HTML = """
                     fallbackToDeviceSpeech(data.response);
                 });
             } else {
+                // ElevenLabs Out of Tokens / Error -> Native Android Voice
                 fallbackToDeviceSpeech(data.response);
             }
         }
@@ -726,7 +733,8 @@ MOBILE_HTML = """
             const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
             const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
             
-            const voices = window.speechSynthesis.getVoices();
+            // Force Android to select a female voice profile
+            let voices = window.speechSynthesis.getVoices();
             const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
             if (femaleVoice) utterance.voice = femaleVoice;
 
@@ -808,7 +816,7 @@ def chat():
             ai_response = "Hello sir."
         elif cleaned_msg_stripped in ["thank you", "thanks"]:
             ai_response = "You're welcome sir."
-        elif cleaned_msg_stripped in ["neon", "hey", "neo", "leon"]:
+        elif cleaned_msg_stripped in ["neon", "hey", "neo", "leon", "wake up"]:
             ai_response = "Sir."
         else:
             if image_b64 and gemini_client:
