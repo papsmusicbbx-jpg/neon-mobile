@@ -37,8 +37,8 @@ INDEX_NAME = "neon-memory"
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# Active model endpoint
-llm = ChatGroq(model="openai/gpt-oss-120b", api_key=GROQ_API_KEY, temperature=0.3)
+# Swapped to Mixtral to avoid Groq's decommissioned Llama errors
+llm = ChatGroq(model="mixtral-8x7b-32768", api_key=GROQ_API_KEY, temperature=0.3)
 
 class ServerlessEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -211,7 +211,148 @@ MOBILE_HTML = """
 </head>
 <body>
 
-// BOOT SCREEN LOGIC
+    <!-- BOOT SCREEN -->
+    <div id="boot-screen">
+        <div class="boot-logo">N.E.O.N.</div>
+        <div class="boot-subtext">DOUBLE TAP TO INITIALIZE</div>
+    </div>
+
+    <div id="hud-toast">
+        <div class="toast-title">⚡ N.E.O.N. // SYSTEM ALERT</div>
+        <div class="toast-body" id="toast-text-el">Neural notification link established.</div>
+    </div>
+
+    <input type="file" id="camera-file-input" accept="image/*" capture="environment" style="display:none;" onchange="handleCameraCapture(event)">
+
+    <div id="viewport-wrapper">
+        <div id="app-container">
+            <div id="screen-chat" class="screen">
+                <div id="avatar-panel">
+                    <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
+                    <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
+                    <div class="hud-stat-box" id="hud-stat-box-el">
+                        STATUS: SLEEPING<br>
+                        MIC: OFFLINE<br>
+                        SYS.VER: 4.8
+                    </div>
+                    <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
+                </div>
+                <div id="terminal-panel">
+                    <div id="chat-box">
+                        <span style="color: var(--main);">> Global link established.</span><br>
+                        <span style="color: var(--main);">> Ready for Tap-to-Wake.</span><br>
+                        <span style="color: #cbd5e1;">> Tap the button below to start.</span><br>
+                    </div>
+                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO WAKE N.E.O.N.</div>
+                </div>
+            </div>
+
+            <div id="screen-commands" class="screen">
+                <div style="color: var(--main); font-weight: bold; margin-bottom: 6px; font-size: 11px;">
+                    <span style="float: left;" onclick="goToScreen(0)">← SWIPE RIGHT</span> &nbsp;&nbsp;&nbsp;COMMAND DECK // MACROS
+                </div>
+                <div class="grid-container" id="macro-grid-container">
+                    <div class="cmd-btn big-kb-trigger" onclick="openKeyboard()">[ OPEN TACTICAL KEYBOARD ]</div>
+                    <div class="cmd-btn" onclick="sendMacro('Give me a quick briefing on today.')">📅 Briefing</div>
+                    <div class="cmd-btn" onclick="getLocationAndSend()">📍 Location</div>
+                    <div class="cmd-btn" onclick="sendMacro('Check your memory databanks.')">🧠 Status</div>
+                    <div class="cmd-btn" id="mute-btn" onclick="toggleMute()">🔇 Mute</div>
+                    <div class="cmd-btn" onclick="triggerMobileCamera()">📸 Vision</div>
+                    <div class="cmd-btn" onclick="sendMacro('Hello N.E.O.N.')">👋 Greet</div>
+                    <div class="cmd-btn" onclick="triggerHudNotification('Neural link verified. HUD alert active.')">🔔 Notify</div>
+                    <div class="cmd-btn" onclick="openMacroBuilder()" style="background: var(--bg); color: #fff;">➕ Add Macro</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TACTICAL KEYBOARD OVERLAY -->
+    <div id="keyboard-overlay">
+        <div id="kb-input-display"><span id="kb-text">_</span></div>
+        <div id="kb-grid">
+            <div class="kb-key" onclick="typeChar('Q')">Q</div><div class="kb-key" onclick="typeChar('W')">W</div><div class="kb-key" onclick="typeChar('E')">E</div><div class="kb-key" onclick="typeChar('R')">R</div><div class="kb-key" onclick="typeChar('T')">T</div><div class="kb-key" onclick="typeChar('Y')">Y</div><div class="kb-key" onclick="typeChar('U')">U</div><div class="kb-key" onclick="typeChar('I')">I</div><div class="kb-key" onclick="typeChar('O')">O</div><div class="kb-key" onclick="typeChar('P')">P</div>
+            <div class="kb-key" onclick="typeChar('A')">A</div><div class="kb-key" onclick="typeChar('S')">S</div><div class="kb-key" onclick="typeChar('D')">D</div><div class="kb-key" onclick="typeChar('F')">F</div><div class="kb-key" onclick="typeChar('G')">G</div><div class="kb-key" onclick="typeChar('H')">H</div><div class="kb-key" onclick="typeChar('J')">J</div><div class="kb-key" onclick="typeChar('K')">K</div><div class="kb-key" onclick="typeChar('L')">L</div><div class="kb-key kb-wide" onclick="backspace()">⌫</div>
+            <div class="kb-key" onclick="typeChar('Z')">Z</div><div class="kb-key" onclick="typeChar('X')">X</div><div class="kb-key" onclick="typeChar('C')">C</div><div class="kb-key" onclick="typeChar('V')">V</div><div class="kb-key" onclick="typeChar('B')">B</div><div class="kb-key" onclick="typeChar('N')">N</div><div class="kb-key" onclick="typeChar('M')">M</div><div class="kb-key" onclick="typeChar('?')">?</div><div class="kb-key" onclick="typeChar('/')">/</div>
+            <div class="kb-key kb-close" onclick="closeKeyboard()">CLOSE</div>
+            <div class="kb-key" onclick="typeChar('.')">.</div>
+            <div class="kb-key kb-space" onclick="typeChar(' ')">SPACE</div>
+            <div class="kb-key kb-exec" onclick="executeKeyboard()">[ EXECUTE ]</div>
+        </div>
+    </div>
+
+    <script>
+        // --- WEB AUDIO API ENGINE ---
+        let audioCtx = null;
+        let humOsc = null;
+        let humGain = null;
+        let isMuted = false;
+
+        function initAudio() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            if (!humOsc) {
+                humOsc = audioCtx.createOscillator();
+                humOsc.type = 'triangle';
+                humOsc.frequency.setValueAtTime(55, audioCtx.currentTime); 
+                
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 300;
+
+                humGain = audioCtx.createGain();
+                humGain.gain.setValueAtTime(isMuted ? 0 : 0.03, audioCtx.currentTime); 
+                
+                humOsc.connect(filter);
+                filter.connect(humGain);
+                humGain.connect(audioCtx.destination);
+                humOsc.start();
+            }
+        }
+
+        function playCyberClick() {
+            if(!audioCtx || audioCtx.state === 'suspended' || isMuted) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.03);
+            
+            gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.03);
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.03);
+        }
+
+        function playBootSound() {
+            if(!audioCtx || isMuted) return;
+            const osc = audioCtx.createOscillator();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.6);
+            
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(200, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(3000, audioCtx.currentTime + 0.6);
+            
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+            
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.6);
+        }
+
+        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -223,12 +364,6 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                
-                // FIXED: Start continuous background listening immediately on boot
-                if (!recognition) initSpeechEngine();
-                isSystemAwake = true;
-                try { recognition.start(); } catch(e) {}
-                updateHudStateUI();
             }, 800);
         }
 
@@ -304,19 +439,15 @@ MOBILE_HTML = """
             isMuted = !isMuted;
             const muteBtn = document.getElementById('mute-btn');
             if (isMuted) {
-                muteBtn.innerText = "🔊 Unmute"; 
-                muteBtn.style.background = "var(--dark)";
+                muteBtn.innerText = "🔊 Unmute"; muteBtn.style.background = "var(--dark)";
                 if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
-                if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
                 if (humGain && audioCtx) humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
-                triggerHudNotification("Audio muted (Text-only mode).");
+                triggerHudNotification("N.E.O.N. audio muted.");
             } else {
-                muteBtn.innerText = "🔇 Mute"; 
-                muteBtn.style.background = "#14060d";
+                muteBtn.innerText = "🔇 Mute"; muteBtn.style.background = "#14060d";
                 if (humGain && audioCtx) humGain.gain.setTargetAtTime(0.03, audioCtx.currentTime, 0.1);
-                triggerHudNotification("Audio enabled (Speech active).");
+                triggerHudNotification("N.E.O.N. audio restored.");
             }
-            updateHudStateUI();
         }
 
         function loadCustomMacros() {
@@ -344,7 +475,7 @@ MOBILE_HTML = """
             const container = document.getElementById('macro-grid-container');
             const btn = document.createElement('div'); btn.className = 'cmd-btn custom-macro-btn'; btn.innerText = name; btn.onclick = () => sendMacro(promptText);
             container.appendChild(btn);
-            triggerHudNotification(`Macro '${name}' compiled.`);
+            triggerHudNotification(`Macro '${name}' successfully compiled.`);
         }
 
         window.addEventListener('DOMContentLoaded', () => { loadCustomMacros(); });
@@ -373,8 +504,6 @@ MOBILE_HTML = """
             if (isProcessing) return; isProcessing = true;
             clearConversationCountdown();
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
-            
             chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             goToScreen(0); 
@@ -411,25 +540,16 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // ENHANCED SPEECH RECOGNITION (ALWAYS ON STANDBY)
+        // TAP-TO-WAKE + 15S ACTIVE CONVERSATION WINDOW
         // ========================================================
         let recognition = null;
         let isConversing = false;
+        let conversationTimer = null;
         let countdownInterval = null;
         let remainingSeconds = 15;
-        let isSystemAwake = false; // Controls if mic should loop forever
+        let shouldKeepListening = false;
 
-        const WAKE_PATTERNS = [
-            /^hey\s+neon/i, /^hi\s+neon/i, /^ok\s+neon/i, /^okay\s+neon/i, /^yo\s+neon/i, /^neon/i,
-            /^hey\s+neo/i, /^hi\s+neo/i, /^neo/i,
-            /^hey\s+leon/i, /^hi\s+leon/i, /^leon/i,
-            /^hey\s+n\.?e\.?o\.?n/i, /^n\.?e\.?o\.?n/i,
-            /^hey\s+kneon/i, /^kneon/i,
-            /^hey\s+meon/i, /^meon/i,
-            /^hey\s+ne\s+on/i, /^ne\s+on/i
-        ];
-
-        function initSpeechEngine() {
+        function initContinuousSpeechEngine() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return false;
             
@@ -445,38 +565,22 @@ MOBILE_HTML = """
                 const transcript = event.results[lastResultIndex][0].transcript.trim();
                 if (!transcript) return;
 
-                if (!isConversing) {
-                    let matchedPattern = null;
-                    for (const pattern of WAKE_PATTERNS) {
-                        if (pattern.test(transcript)) {
-                            matchedPattern = pattern;
-                            break;
-                        }
-                    }
-
-                    if (matchedPattern) {
-                        let cleanPrompt = transcript.replace(matchedPattern, '').replace(/^[,.\s]+/, '').trim();
-                        if (!cleanPrompt) {
-                            cleanPrompt = "Neon"; 
-                        }
-                        isConversing = true;
-                        sendMacro(cleanPrompt);
-                    }
-                } else {
+                if (isConversing) {
                     sendMacro(transcript);
                 }
             };
 
             recognition.onerror = function(event) {
                 if (event.error !== 'no-speech' && event.error !== 'aborted') {
-                    console.log("Speech recognition notice:", event.error);
+                    console.log("Speech engine warning:", event.error);
                 }
             };
 
             recognition.onend = function() {
-                // FIXED: ALWAYS restart the mic to keep standby mode alive 24/7
-                if (isSystemAwake) {
+                if (isConversing && shouldKeepListening) {
                     try { recognition.start(); } catch(e) {}
+                } else {
+                    endConversationWindow();
                 }
             };
 
@@ -485,11 +589,13 @@ MOBILE_HTML = """
 
         function manualMicToggle() {
             if (!isConversing) {
-                if (!recognition && !initSpeechEngine()) {
-                    triggerHudNotification("Speech recognition not supported on this browser.");
+                if (!recognition && !initContinuousSpeechEngine()) {
+                    triggerHudNotification("Speech recognition unavailable.");
                     return;
                 }
+                shouldKeepListening = true;
                 startConversationCountdown();
+                try { recognition.start(); } catch(e) {}
             } else {
                 endConversationWindow();
             }
@@ -513,95 +619,75 @@ MOBILE_HTML = """
 
         function clearConversationCountdown() {
             if (countdownInterval) clearInterval(countdownInterval);
+            if (conversationTimer) clearTimeout(conversationTimer);
             countdownInterval = null;
+            conversationTimer = null;
         }
 
         function endConversationWindow() {
             clearConversationCountdown();
             isConversing = false;
-            // FIXED: Do NOT stop the mic. Just go back to passive standby state.
+            shouldKeepListening = false;
+            if (recognition) {
+                try { recognition.stop(); } catch(e) {}
+            }
             updateHudStateUI();
         }
 
         function updateHudStateUI() {
             const micBtn = document.getElementById('mic-button-el');
             const statBox = document.getElementById('hud-stat-box-el');
-            const audioStateStr = isMuted ? "MUTED" : "UNMUTED";
             
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>AUDIO: ${audioStateStr}<br>MIC: PROCESSING<br>SYS.VER: 5.0`;
+                statBox.innerHTML = "STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 4.8";
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>AUDIO: ${audioStateStr}<br>ACTIVE: ${remainingSeconds}s<br>SYS.VER: 5.0`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 4.8`;
             } else {
-                micBtn.innerText = "TAP TO SPEAK / SAY 'NEON'";
+                micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: ONLINE<br>AUDIO: ${audioStateStr}<br>MIC: STANDBY<br>SYS.VER: 5.0`;
+                statBox.innerHTML = "STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 4.8";
             }
         }
 
-        // --- UNIFIED VOICE PLAYBACK & AUTOMATIC DEVICE FALLBACK ---
         function playAiVoiceResponse(data) {
             clearConversationCountdown();
-
-            // If user explicitly muted: absolute silence, text only
-            if (isMuted) {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
-                return;
-            }
             
-            // 1. Try ElevenLabs Audio if URL exists
-            if (data.audio_url) {
+            if (data.audio_url && !isMuted) {
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                 currentAudio.onended = () => {
                     isProcessing = false;
                     if (isConversing) startConversationCountdown();
                 };
                 currentAudio.onerror = () => {
-                    fallbackToDeviceSpeech(data.response);
+                    isProcessing = false;
+                    if (isConversing) startConversationCountdown();
                 };
                 currentAudio.play().catch(e => {
-                    fallbackToDeviceSpeech(data.response);
+                    isProcessing = false;
+                    if (isConversing) startConversationCountdown();
                 });
+            } else if (isMuted) {
+                let synth = window.speechSynthesis;
+                let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
+                fallbackUtterance.pitch = 0.8;
+                fallbackUtterance.rate = 1.1;
+                fallbackUtterance.onend = () => {
+                    isProcessing = false;
+                    if (isConversing) startConversationCountdown();
+                };
+                fallbackUtterance.onerror = () => {
+                    isProcessing = false;
+                    if (isConversing) startConversationCountdown();
+                };
+                synth.speak(fallbackUtterance);
             } else {
-                // 2. ElevenLabs had no tokens or failed -> Instant Fallback to Device Female Voice
-                fallbackToDeviceSpeech(data.response);
+                isProcessing = false;
+                if (isConversing) startConversationCountdown();
             }
-        }
-
-        function fallbackToDeviceSpeech(textResponse) {
-            if (!('speechSynthesis' in window)) {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
-                return;
-            }
-
-            window.speechSynthesis.cancel();
-            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
-            const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-            
-            // Prefer female English voice if available on the device
-            const voices = window.speechSynthesis.getVoices();
-            const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
-            if (femaleVoice) utterance.voice = femaleVoice;
-
-            utterance.pitch = 0.95;
-            utterance.rate = 1.05;
-
-            utterance.onend = () => {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
-            };
-            utterance.onerror = () => {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
-            };
-
-            window.speechSynthesis.speak(utterance);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
@@ -616,8 +702,6 @@ MOBILE_HTML = """
             updateHudStateUI();
 
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
-
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
@@ -659,7 +743,7 @@ def chat():
     try:
         ai_response = None
         
-        # --- QUICK ACKNOWLEDGMENT OVERRIDES (Instant, 0 Tokens) ---
+        # --- QUICK ACKNOWLEDGMENT OVERRIDES (Instant, Zero LLM Token Usage) ---
         clean_msg = user_message.lower().strip()
         cleaned_msg_stripped = re.sub(r'[^\w\s]', '', clean_msg)
         
@@ -667,7 +751,7 @@ def chat():
             ai_response = "Hello sir."
         elif cleaned_msg_stripped in ["thank you", "thanks"]:
             ai_response = "You're welcome sir."
-        elif cleaned_msg_stripped in ["neon", "hey", "neo", "leon"]:
+        elif cleaned_msg_stripped in ["neon", "hey"]:
             ai_response = "Sir."
         else:
             if image_b64 and gemini_client:
@@ -711,7 +795,7 @@ def chat():
                         if chunk: f.write(chunk)
                 audio_url = f"/static/{audio_filename}?v=1"
             except Exception as e:
-                # Quota exceeded or error -> return None so frontend triggers device female TTS
+                print(f"ElevenLabs API Error: {e}")
                 audio_url = None
 
         return jsonify({"response": ai_response.replace('\n', '<br>'), "audio_url": audio_url})
