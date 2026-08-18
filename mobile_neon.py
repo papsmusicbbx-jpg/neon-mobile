@@ -233,7 +233,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: SLEEPING<br>
                         MIC: OFFLINE<br>
-                        SYS.VER: 7.2 (BUFFER)
+                        SYS.VER: 8.0 UNLOCK
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -285,6 +285,19 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
+        
+        // CRITICAL FIX: The TTS Unlocker
+        let isTtsUnlocked = false;
+
+        function unlockTTS() {
+            if (!isTtsUnlocked && 'speechSynthesis' in window) {
+                let unlockUtterance = new SpeechSynthesisUtterance('');
+                unlockUtterance.volume = 0; // Silent play
+                window.speechSynthesis.speak(unlockUtterance);
+                isTtsUnlocked = true;
+                console.log("TTS Engine Unlocked for Mobile.");
+            }
+        }
 
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -356,6 +369,7 @@ MOBILE_HTML = """
         const viewport = document.getElementById('viewport-wrapper');
 
         function unlockTerminal() {
+            unlockTTS(); // Unlock voice instantly on boot screen tap
             initAudio();
             playBootSound();
             bootScreen.style.opacity = '0';
@@ -496,8 +510,8 @@ MOBILE_HTML = """
 
         async function sendImageToNeon(base64Image) {
             if (isProcessing) return; 
+            unlockTTS();
             
-            // Instantly stop the mic to free audio focus
             if (recognition) { try { recognition.stop(); } catch(e) {} }
             pauseConversationTimer();
             isProcessing = true;
@@ -580,11 +594,10 @@ MOBILE_HTML = """
         }
 
         function manualMicToggle() {
+            unlockTTS(); // INSTANT UNLOCK
             if (isConversing || isProcessing) {
-                // Manually force her to sleep
                 forceSleep();
             } else {
-                // Manually wake her up
                 isConversing = true;
                 if (!recognition) initSpeechEngine();
                 try { recognition.start(); } catch(e) {}
@@ -635,15 +648,15 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 7.2 (BUFFER)`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 8.0 UNLOCK`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 7.2 (BUFFER)`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 8.0 UNLOCK`;
             } else {
                 micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 7.2 (BUFFER)`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 8.0 UNLOCK`;
             }
         }
 
@@ -654,19 +667,14 @@ MOBILE_HTML = """
                 return;
             }
             
-            // THE FIX: Wait exactly 500 milliseconds before playing any audio.
-            // This gives Android's slow hardware time to turn off the microphone 
-            // so it doesn't accidentally block the speaker!
-            setTimeout(() => {
-                if (data.audio_url) {
-                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                    currentAudio.onended = finishProcessing;
-                    currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
-                    currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
-                } else {
-                    fallbackToDeviceSpeech(data.response);
-                }
-            }, 500);
+            if (data.audio_url) {
+                currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                currentAudio.onended = finishProcessing;
+                currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
+                currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
+            } else {
+                fallbackToDeviceSpeech(data.response);
+            }
         }
 
         function fallbackToDeviceSpeech(textResponse) {
@@ -675,40 +683,49 @@ MOBILE_HTML = """
                 return;
             }
 
-            // Bare-bones, pure Text-to-Speech call. 
-            // No hacks, no voice searching, no lang enforcement. Let Android handle it natively.
-            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+            // Purge any stuck Android audio queue
+            window.speechSynthesis.cancel();
             
-            window.__neonUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
-            window.__neonUtterance.onend = finishProcessing;
-            window.__neonUtterance.onerror = finishProcessing;
-
-            window.speechSynthesis.speak(window.__neonUtterance);
-            
-            // Failsafe: Unstick the UI after 10 seconds if Android gets permanently confused
             setTimeout(() => {
-                if (isProcessing) finishProcessing();
-            }, 10000);
+                const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+                
+                // Set to global variable to fight Android Garbage Collector
+                window.__neonUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
+                window.__neonUtterance.lang = 'en-US'; 
+                
+                window.__neonUtterance.onend = finishProcessing;
+                window.__neonUtterance.onerror = finishProcessing;
+
+                window.speechSynthesis.speak(window.__neonUtterance);
+                
+                // Fallback to unstick the app if Android bugs out entirely
+                setTimeout(() => {
+                    if (isProcessing) finishProcessing();
+                }, 8000);
+            }, 50);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
 
         async function executeKeyboard() {
+            unlockTTS(); // INSTANT UNLOCK
             if (isProcessing) return; 
             const text = kbString.trim(); 
             if(text === "") { closeKeyboard(); return; }
             
-            // 1. STOP THE MIC INSTANTLY
+            // STOP MIC
             if (recognition) { try { recognition.stop(); } catch(e) {} }
             pauseConversationTimer();
             isProcessing = true;
             updateHudStateUI();
 
+            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
+            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
             
-            // 2. FETCH THE RESPONSE
             try {
                 const response = await fetch('/chat', { 
                     method: 'POST', 
@@ -719,7 +736,6 @@ MOBILE_HTML = """
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
                 
-                // 3. PLAY THE AUDIO
                 playAiVoiceResponse(data);
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
