@@ -231,18 +231,20 @@ MOBILE_HTML = """
                     <div style="color: var(--main); font-weight: bold; font-size: 12px; letter-spacing: 1px;">N.E.O.N. // CORE</div>
                     <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
                     <div class="hud-stat-box" id="hud-stat-box-el">
-                        STATUS: SLEEPING<br>
-                        MIC: OFFLINE<br>
-                        SYS.VER: 8.0 UNLOCK
+                        STATUS: ONLINE<br>
+                        MIC: ARCHIVED<br>
+                        INPUT: KEYBOARD ONLY<br>
+                        SYS.VER: 8.5 (ISOLATED)
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: #cbd5e1;">> Ready for Push-to-Talk.</span><br>
+                        <span style="color: #cbd5e1;">> Microphone subsystem temporarily archived.</span><br>
+                        <span style="color: #cbd5e1;">> Ready for text input.</span><br>
                     </div>
-                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO WAKE N.E.O.N.</div>
+                    <div class="mic-btn" id="mic-button-el" onclick="openKeyboard()">OPEN TERMINAL KEYBOARD</div>
                 </div>
             </div>
 
@@ -285,18 +287,11 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
-        
-        // CRITICAL FIX: The TTS Unlocker
-        let isTtsUnlocked = false;
 
-        function unlockTTS() {
-            if (!isTtsUnlocked && 'speechSynthesis' in window) {
-                let unlockUtterance = new SpeechSynthesisUtterance('');
-                unlockUtterance.volume = 0; // Silent play
-                window.speechSynthesis.speak(unlockUtterance);
-                isTtsUnlocked = true;
-                console.log("TTS Engine Unlocked for Mobile.");
-            }
+        // Force voice pre-load
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+            window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
         }
 
         function initAudio() {
@@ -364,19 +359,27 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
+        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
 
         function unlockTerminal() {
-            unlockTTS(); // Unlock voice instantly on boot screen tap
             initAudio();
             playBootSound();
+            
+            // Sneaky Audio Unlocker - Runs exact moment of physical screen tap
+            if ('speechSynthesis' in window) {
+                let warmup = new SpeechSynthesisUtterance('');
+                warmup.volume = 0;
+                window.speechSynthesis.speak(warmup);
+            }
+
             bootScreen.style.opacity = '0';
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                updateHudStateUI(); 
+                updateStatusUI(); 
             }, 800);
         }
 
@@ -395,6 +398,7 @@ MOBILE_HTML = """
             }
         });
 
+        // HUD SWIPE LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -415,7 +419,8 @@ MOBILE_HTML = """
             if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); }
         }, { passive: false });
 
-        let kbString = ""; let currentAudio = null;
+        // KEYBOARD & INPUT STATE
+        let kbString = ""; let isProcessing = false; let currentAudio = null;
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
         const chatBox = document.getElementById('chat-box');
@@ -508,216 +513,96 @@ MOBILE_HTML = """
             reader.readAsDataURL(file); event.target.value = ''; 
         }
 
-        async function sendImageToNeon(base64Image) {
-            if (isProcessing) return; 
-            unlockTTS();
-            
-            if (recognition) { try { recognition.stop(); } catch(e) {} }
-            pauseConversationTimer();
-            isProcessing = true;
-            updateHudStateUI();
-
-            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
-            
-            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
-            const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
-            goToScreen(0); 
-            try {
-                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "Describe what you see in this picture concise and clearly.", image: base64Image, is_muted: isMuted }) });
-                const data = await response.json();
-                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
-                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
-                
-                playAiVoiceResponse(data);
-            } catch (error) {
-                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
-                finishProcessing();
-            }
-        }
-
-        function getLocationAndSend() {
-            if (isProcessing) return;
-            if (!navigator.geolocation) { sendMacro("What is my current location?"); return; }
-            chatBox.innerHTML += `<br>> <span style="color: var(--main); font-style: italic;">> Acquiring satellite GPS fix...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
-                    const lat = position.coords.latitude; const lon = position.coords.longitude;
-                    try {
-                        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
-                        const data = await res.json();
-                        sendMacro(`My physical GPS location is currently ${data.display_name || `Lat ${lat}, Lon ${lon}`}. Acknowledge my location.`);
-                    } catch (e) { sendMacro(`My GPS coordinates are Latitude: ${lat}, Longitude: ${lon}. Tell me where I am.`); }
-                },
-                (error) => { alert("Location access denied."); },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-            );
-        }
-
-        // ========================================================
-        // PURE PUSH-TO-TALK LOGIC
-        // ========================================================
-        let recognition = null;
-        let isConversing = false; 
-        let isProcessing = false; 
-        let countdownInterval = null;
-        let remainingSeconds = 15;
-
-        function initSpeechEngine() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) return false;
-            
-            recognition = new SpeechRecognition();
-            recognition.continuous = false; 
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
-
-            recognition.onresult = function(event) {
-                const lastResultIndex = event.results.length - 1;
-                const transcript = event.results[lastResultIndex][0].transcript.trim();
-                if (transcript) {
-                    sendMacro(transcript);
-                }
-            };
-
-            recognition.onerror = function(event) {
-                console.log("Speech error:", event.error);
-            };
-
-            recognition.onend = function() {
-                if (isConversing && !isProcessing) {
-                    try { recognition.start(); } catch(e) {}
-                }
-            };
-
-            return true;
-        }
-
-        function manualMicToggle() {
-            unlockTTS(); // INSTANT UNLOCK
-            if (isConversing || isProcessing) {
-                forceSleep();
-            } else {
-                isConversing = true;
-                if (!recognition) initSpeechEngine();
-                try { recognition.start(); } catch(e) {}
-                resetConversationTimer();
-                updateHudStateUI();
-            }
-        }
-
-        function resetConversationTimer() {
-            if (countdownInterval) clearInterval(countdownInterval);
-            remainingSeconds = 15;
-            
-            countdownInterval = setInterval(() => {
-                remainingSeconds--;
-                updateHudStateUI();
-                
-                if (remainingSeconds <= 0) {
-                    forceSleep();
-                }
-            }, 1000);
-        }
-
-        function pauseConversationTimer() {
-            if (countdownInterval) clearInterval(countdownInterval);
-        }
-
-        function forceSleep() {
-            pauseConversationTimer();
-            isConversing = false;
-            isProcessing = false;
-            if (recognition) { try { recognition.stop(); } catch(e) {} }
-            updateHudStateUI();
-        }
-
-        function finishProcessing() {
-            isProcessing = false;
-            if (isConversing) {
-                resetConversationTimer();
-                if (recognition) { try { recognition.start(); } catch(e) {} }
-            }
-            updateHudStateUI();
-        }
-
-        function updateHudStateUI() {
+        function updateStatusUI() {
             const micBtn = document.getElementById('mic-button-el');
-            const statBox = document.getElementById('hud-stat-box-el');
-            
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 8.0 UNLOCK`;
-            } else if (isConversing) {
-                micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
-                micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 8.0 UNLOCK`;
             } else {
-                micBtn.innerText = "TAP TO WAKE N.E.O.N.";
+                micBtn.innerText = "OPEN TERMINAL KEYBOARD";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 8.0 UNLOCK`;
             }
         }
 
-        // --- UNIFIED VOICE PLAYBACK & AUTOMATIC DEVICE FALLBACK ---
+        // ========================================================
+        // ISOLATED TEXT-TO-SPEECH LOGIC
+        // ========================================================
         function playAiVoiceResponse(data) {
             if (isMuted) {
-                finishProcessing();
+                isProcessing = false;
+                updateStatusUI();
                 return;
             }
             
+            // Check if ElevenLabs actually sent us an audio file back
             if (data.audio_url) {
+                triggerHudNotification("Playing ElevenLabs audio...");
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                currentAudio.onended = finishProcessing;
-                currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
-                currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
+                
+                currentAudio.onended = () => {
+                    isProcessing = false;
+                    updateStatusUI();
+                };
+                currentAudio.onerror = () => {
+                    // If the ElevenLabs MP3 file fails to play
+                    fallbackToDeviceSpeech(data.response);
+                };
+                
+                currentAudio.play().catch(() => {
+                    fallbackToDeviceSpeech(data.response);
+                });
             } else {
+                // ElevenLabs returned NULL (out of tokens or API error)
                 fallbackToDeviceSpeech(data.response);
             }
         }
 
         function fallbackToDeviceSpeech(textResponse) {
             if (!('speechSynthesis' in window)) {
-                finishProcessing();
+                triggerHudNotification("Device TTS not supported.");
+                isProcessing = false;
+                updateStatusUI();
                 return;
             }
 
-            // Purge any stuck Android audio queue
+            triggerHudNotification("Using offline Android backup voice.");
+            
+            // Cancel any glitched audio
             window.speechSynthesis.cancel();
             
+            // Wait slightly so Android doesn't swallow the command
             setTimeout(() => {
                 const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
                 
-                // Set to global variable to fight Android Garbage Collector
-                window.__neonUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
-                window.__neonUtterance.lang = 'en-US'; 
+                // Store in global window variable so Garbage Collector doesn't delete it
+                window.__neonBackupVoice = new SpeechSynthesisUtterance(cleanSpokenText);
+                window.__neonBackupVoice.lang = 'en-US'; 
                 
-                window.__neonUtterance.onend = finishProcessing;
-                window.__neonUtterance.onerror = finishProcessing;
+                window.__neonBackupVoice.onend = () => {
+                    isProcessing = false;
+                    updateStatusUI();
+                };
+                
+                window.__neonBackupVoice.onerror = (e) => {
+                    console.log("TTS Error:", e);
+                    triggerHudNotification("Android TTS Engine Error.");
+                    isProcessing = false;
+                    updateStatusUI();
+                };
 
-                window.speechSynthesis.speak(window.__neonUtterance);
-                
-                // Fallback to unstick the app if Android bugs out entirely
-                setTimeout(() => {
-                    if (isProcessing) finishProcessing();
-                }, 8000);
+                window.speechSynthesis.speak(window.__neonBackupVoice);
             }, 50);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
 
         async function executeKeyboard() {
-            unlockTTS(); // INSTANT UNLOCK
             if (isProcessing) return; 
             const text = kbString.trim(); 
             if(text === "") { closeKeyboard(); return; }
             
-            // STOP MIC
-            if (recognition) { try { recognition.stop(); } catch(e) {} }
-            pauseConversationTimer();
             isProcessing = true;
-            updateHudStateUI();
+            updateStatusUI();
 
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
             if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
@@ -733,6 +618,7 @@ MOBILE_HTML = """
                     body: JSON.stringify({ message: text, is_muted: isMuted }) 
                 });
                 const data = await response.json();
+                
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
                 
@@ -740,7 +626,8 @@ MOBILE_HTML = """
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
-                finishProcessing();
+                isProcessing = false;
+                updateStatusUI();
             }
         }
     </script>
