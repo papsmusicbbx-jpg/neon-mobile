@@ -233,7 +233,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: SLEEPING<br>
                         MIC: OFFLINE<br>
-                        SYS.VER: 5.7 PTT
+                        SYS.VER: 5.8 PTT
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -286,8 +286,11 @@ MOBILE_HTML = """
         let humGain = null;
         let isMuted = false;
 
+        // Force Android WebView to dynamically map voices asynchronously
         if ('speechSynthesis' in window) {
-            window.speechSynthesis.getVoices();
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.getVoices();
+            };
         }
 
         function initAudio() {
@@ -355,6 +358,7 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
+        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -385,6 +389,7 @@ MOBILE_HTML = """
             }
         });
 
+        // HUD LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -413,8 +418,15 @@ MOBILE_HTML = """
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
         
-        function typeChar(char) { kbString += char; updateKbDisplay(); }
-        function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
+        function typeChar(char) { 
+            kbString += char; 
+            updateKbDisplay(); 
+        }
+        
+        function backspace() { 
+            kbString = kbString.slice(0, -1); 
+            updateKbDisplay(); 
+        }
         
         function updateKbDisplay() { 
             kbDisplay.innerText = kbString + "_"; 
@@ -437,7 +449,7 @@ MOBILE_HTML = """
                 muteBtn.innerText = "🔊 Unmute"; 
                 muteBtn.style.background = "var(--dark)";
                 if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
-                if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+                if ('speechSynthesis' in window && window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); }
                 if (humGain && audioCtx) humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
                 triggerHudNotification("Audio muted (Text-only mode).");
             } else {
@@ -502,11 +514,9 @@ MOBILE_HTML = """
             if (isProcessing) return; isProcessing = true;
             clearConversationCountdown();
             
-            // KILL MIC WHEN PROCESSING
             if (recognition) { try { recognition.stop(); } catch(e) {} }
-            
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+            if ('speechSynthesis' in window && window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); }
             
             chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
@@ -579,8 +589,7 @@ MOBILE_HTML = """
             };
 
             recognition.onend = function() {
-                // STRICT RULE: Only restart if we are explicitly inside the 15-second window
-                // AND we are NOT processing or speaking!
+                // ONLY restart if we are explicitly inside the 15-second window AND NOT processing
                 if (isConversing && !isProcessing) {
                     try { recognition.start(); } catch(e) {}
                 }
@@ -596,13 +605,21 @@ MOBILE_HTML = """
                     return;
                 }
                 
-                // Wake her up manually via Tap
+                // ANDROID TTS WARM-UP HACK: Play a silent invisible utterance instantly on tap
+                if ('speechSynthesis' in window) {
+                    let warmup = new SpeechSynthesisUtterance('');
+                    warmup.volume = 0;
+                    window.speechSynthesis.speak(warmup);
+                }
+                
+                // Wake her up manually
                 isConversing = true;
-                // DO NOT START THE MIC YET! Send the greeting first so she can reply cleanly.
+                
+                // Send a silent greeting to trigger her audio response
                 sendMacro("Neon");
                 
             } else {
-                // User pressed the button again to manually put her to sleep
+                // User pressed the button again to manually sleep
                 endConversationWindow();
             }
         }
@@ -613,7 +630,7 @@ MOBILE_HTML = """
             remainingSeconds = 15;
             updateHudStateUI();
 
-            // Safe restart of the mic NOW that she is done speaking
+            // Safe restart of the mic NOW that she is completely done speaking
             if (recognition && !isProcessing) {
                 try { recognition.start(); } catch(e) {}
             }
@@ -650,15 +667,15 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 5.7 PTT`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 5.8 PTT`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.7 PTT`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.8 PTT`;
             } else {
                 micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 5.7 PTT`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 5.8 PTT`;
             }
         }
 
@@ -696,9 +713,12 @@ MOBILE_HTML = """
                 return;
             }
 
-            window.speechSynthesis.cancel();
+            // ONLY cancel if Android is currently actively stuck talking. Do not blindly cancel.
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.cancel();
+            }
             
-            // Add a tiny 100ms delay to let the microphone fully release its audio lock before speaking
+            // Add a tiny 100ms delay to protect Android from dropping the utterance
             setTimeout(() => {
                 const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
                 const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
@@ -707,8 +727,10 @@ MOBILE_HTML = """
                 
                 let voices = window.speechSynthesis.getVoices();
                 if (voices.length > 0) {
-                    const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
-                    if (femaleVoice) utterance.voice = femaleVoice;
+                    // Try to find a female English voice, if not, pick the very first English voice available
+                    let v = voices.find(voice => voice.lang.startsWith('en') && /female/i.test(voice.name)) 
+                         || voices.find(voice => voice.lang.startsWith('en'));
+                    if (v) utterance.voice = v;
                 }
 
                 utterance.pitch = 0.95;
@@ -744,7 +766,7 @@ MOBILE_HTML = """
             updateHudStateUI();
 
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+            if ('speechSynthesis' in window && window.speechSynthesis.speaking) { window.speechSynthesis.cancel(); }
 
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
