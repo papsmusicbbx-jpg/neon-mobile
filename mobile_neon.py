@@ -233,7 +233,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: SLEEPING<br>
                         MIC: OFFLINE<br>
-                        SYS.VER: 6.0 PTT
+                        SYS.VER: 7.0 (PURE)
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -285,16 +285,6 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
-        
-        // CRITICAL FIX 1: This stops Android from deleting the voice out of memory mid-sentence
-        window.__neonUtterance = null;
-
-        // Force Android WebView to dynamically map voices asynchronously
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.onvoiceschanged = () => {
-                window.speechSynthesis.getVoices();
-            };
-        }
 
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -361,7 +351,6 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
-        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -392,7 +381,6 @@ MOBILE_HTML = """
             }
         });
 
-        // HUD LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -413,7 +401,7 @@ MOBILE_HTML = """
             if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); }
         }, { passive: false });
 
-        let kbString = ""; let isProcessing = false; let currentAudio = null;
+        let kbString = ""; let currentAudio = null;
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
         const chatBox = document.getElementById('chat-box');
@@ -421,15 +409,8 @@ MOBILE_HTML = """
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
         
-        function typeChar(char) { 
-            kbString += char; 
-            updateKbDisplay(); 
-        }
-        
-        function backspace() { 
-            kbString = kbString.slice(0, -1); 
-            updateKbDisplay(); 
-        }
+        function typeChar(char) { kbString += char; updateKbDisplay(); }
+        function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
         
         function updateKbDisplay() { 
             kbDisplay.innerText = kbString + "_"; 
@@ -514,10 +495,14 @@ MOBILE_HTML = """
         }
 
         async function sendImageToNeon(base64Image) {
-            if (isProcessing) return; isProcessing = true;
-            clearConversationCountdown();
+            if (isProcessing) return; 
             
+            // Instantly stop the mic to free audio focus
             if (recognition) { try { recognition.stop(); } catch(e) {} }
+            pauseConversationTimer();
+            isProcessing = true;
+            updateHudStateUI();
+
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
             if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
             
@@ -533,8 +518,7 @@ MOBILE_HTML = """
                 playAiVoiceResponse(data);
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
-                isProcessing = false;
-                startConversationCountdown();
+                finishProcessing();
             }
         }
 
@@ -557,10 +541,11 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // PUSH-TO-TALK ONLY (TAP TO WAKE) + 15S WINDOW
+        // PURE PUSH-TO-TALK LOGIC
         // ========================================================
         let recognition = null;
-        let isConversing = false;
+        let isConversing = false; // Is the 15s session alive?
+        let isProcessing = false; // Is AI thinking/speaking?
         let countdownInterval = null;
         let remainingSeconds = 15;
 
@@ -569,30 +554,25 @@ MOBILE_HTML = """
             if (!SpeechRecognition) return false;
             
             recognition = new SpeechRecognition();
-            recognition.continuous = true;
+            // Critical: Set to FALSE so it automatically stops listening as soon as you stop talking.
+            recognition.continuous = false; 
             recognition.interimResults = false;
             recognition.lang = 'en-US';
 
             recognition.onresult = function(event) {
-                if (isProcessing) return;
-
                 const lastResultIndex = event.results.length - 1;
                 const transcript = event.results[lastResultIndex][0].transcript.trim();
-                if (!transcript) return;
-
-                if (isConversing) {
+                if (transcript) {
                     sendMacro(transcript);
                 }
             };
 
             recognition.onerror = function(event) {
-                if (event.error !== 'no-speech' && event.error !== 'aborted') {
-                    console.log("Speech recognition notice:", event.error);
-                }
+                console.log("Speech error:", event.error);
             };
 
             recognition.onend = function() {
-                // ONLY restart if explicitly inside the 15-second window AND not processing.
+                // If we are conversing but NOT processing, turn the mic back on to listen.
                 if (isConversing && !isProcessing) {
                     try { recognition.start(); } catch(e) {}
                 }
@@ -602,58 +582,50 @@ MOBILE_HTML = """
         }
 
         function manualMicToggle() {
-            if (!isConversing) {
-                if (!recognition && !initSpeechEngine()) {
-                    triggerHudNotification("Speech recognition not supported on this device.");
-                    return;
-                }
-                
-                // CRITICAL FIX 2: Unlock Android Voice Engine with an invisible 0.01 volume click
-                if ('speechSynthesis' in window) {
-                    let unlockUtterance = new SpeechSynthesisUtterance('.');
-                    unlockUtterance.volume = 0.01;
-                    window.speechSynthesis.speak(unlockUtterance);
-                }
-                
-                isConversing = true;
-                sendMacro("Neon");
-                
+            if (isConversing || isProcessing) {
+                // Manually force her to sleep
+                forceSleep();
             } else {
-                endConversationWindow();
+                // Manually wake her up
+                isConversing = true;
+                if (!recognition) initSpeechEngine();
+                try { recognition.start(); } catch(e) {}
+                resetConversationTimer();
+                updateHudStateUI();
             }
         }
 
-        function startConversationCountdown() {
-            clearConversationCountdown();
-            isConversing = true;
+        function resetConversationTimer() {
+            if (countdownInterval) clearInterval(countdownInterval);
             remainingSeconds = 15;
-            updateHudStateUI();
-
-            if (recognition && !isProcessing) {
-                try { recognition.start(); } catch(e) {}
-            }
-
+            
             countdownInterval = setInterval(() => {
                 remainingSeconds--;
+                updateHudStateUI();
+                
                 if (remainingSeconds <= 0) {
-                    endConversationWindow();
-                } else {
-                    updateHudStateUI();
+                    forceSleep();
                 }
             }, 1000);
         }
 
-        function clearConversationCountdown() {
+        function pauseConversationTimer() {
             if (countdownInterval) clearInterval(countdownInterval);
-            countdownInterval = null;
         }
 
-        function endConversationWindow() {
-            clearConversationCountdown();
+        function forceSleep() {
+            pauseConversationTimer();
             isConversing = false;
-            
-            if (recognition) {
-                try { recognition.stop(); } catch(e) {}
+            isProcessing = false;
+            if (recognition) { try { recognition.stop(); } catch(e) {} }
+            updateHudStateUI();
+        }
+
+        function finishProcessing() {
+            isProcessing = false;
+            if (isConversing) {
+                resetConversationTimer();
+                if (recognition) { try { recognition.start(); } catch(e) {} }
             }
             updateHudStateUI();
         }
@@ -665,40 +637,30 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 6.0 PTT`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 7.0 (PURE)`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 6.0 PTT`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 7.0 (PURE)`;
             } else {
                 micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 6.0 PTT`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 7.0 (PURE)`;
             }
         }
 
         // --- UNIFIED VOICE PLAYBACK & AUTOMATIC DEVICE FALLBACK ---
         function playAiVoiceResponse(data) {
-            clearConversationCountdown();
-
             if (isMuted) {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
+                finishProcessing();
                 return;
             }
             
             if (data.audio_url) {
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                currentAudio.onended = () => {
-                    isProcessing = false;
-                    if (isConversing) startConversationCountdown();
-                };
-                currentAudio.onerror = () => {
-                    fallbackToDeviceSpeech(data.response);
-                };
-                currentAudio.play().catch(e => {
-                    fallbackToDeviceSpeech(data.response);
-                });
+                currentAudio.onended = finishProcessing;
+                currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
+                currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
             } else {
                 fallbackToDeviceSpeech(data.response);
             }
@@ -706,54 +668,30 @@ MOBILE_HTML = """
 
         function fallbackToDeviceSpeech(textResponse) {
             if (!('speechSynthesis' in window)) {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
+                finishProcessing();
                 return;
             }
 
             window.speechSynthesis.cancel();
             
-            setTimeout(() => {
-                const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
-                
-                // CRITICAL FIX 1: Apply to global variable so Android memory garbage collector can't delete it
-                window.__neonUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
-                window.__neonUtterance.lang = 'en-US'; 
-                
-                let voices = window.speechSynthesis.getVoices();
-                if (voices.length > 0) {
-                    const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
-                    if (femaleVoice) window.__neonUtterance.voice = femaleVoice;
-                }
+            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+            const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
+            
+            utterance.lang = 'en-US'; 
+            
+            let voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+                const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
+                if (femaleVoice) utterance.voice = femaleVoice;
+            }
 
-                window.__neonUtterance.pitch = 0.95;
-                window.__neonUtterance.rate = 1.05;
+            utterance.pitch = 0.95;
+            utterance.rate = 1.05;
 
-                window.__neonUtterance.onend = () => {
-                    if(isProcessing) {
-                        isProcessing = false;
-                        if (isConversing) startConversationCountdown();
-                    }
-                };
-                window.__neonUtterance.onerror = () => {
-                    if(isProcessing) {
-                        isProcessing = false;
-                        if (isConversing) startConversationCountdown();
-                    }
-                };
+            utterance.onend = finishProcessing;
+            utterance.onerror = finishProcessing;
 
-                window.speechSynthesis.speak(window.__neonUtterance);
-                
-                // CRITICAL FIX 3: Android Watchdog Timer. If Android bugs out and forgets to send the "I am done talking" signal, this resets the mic automatically after 1 second of silence.
-                let watchdog = setInterval(() => {
-                    if (!window.speechSynthesis.speaking && isProcessing) {
-                        clearInterval(watchdog);
-                        isProcessing = false;
-                        if (isConversing) startConversationCountdown();
-                    }
-                }, 1000);
-
-            }, 50);
+            window.speechSynthesis.speak(utterance);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
@@ -763,13 +701,13 @@ MOBILE_HTML = """
             const text = kbString.trim(); 
             if(text === "") { closeKeyboard(); return; }
             
-            isProcessing = true;
-            
+            // 1. STOP THE MIC INSTANTLY
             if (recognition) { try { recognition.stop(); } catch(e) {} }
-            
-            clearConversationCountdown();
+            pauseConversationTimer();
+            isProcessing = true;
             updateHudStateUI();
 
+            // 2. CANCEL ANY EXISTING AUDIO
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
             if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
 
@@ -777,6 +715,7 @@ MOBILE_HTML = """
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
             
+            // 3. FETCH THE RESPONSE
             try {
                 const response = await fetch('/chat', { 
                     method: 'POST', 
@@ -787,12 +726,12 @@ MOBILE_HTML = """
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
                 
+                // 4. PLAY THE AUDIO
                 playAiVoiceResponse(data);
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
+                finishProcessing();
             }
         }
     </script>
