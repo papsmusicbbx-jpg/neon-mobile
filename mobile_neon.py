@@ -234,7 +234,7 @@ MOBILE_HTML = """
                         STATUS: ONLINE<br>
                         MIC: MONITORING<br>
                         WAKE: 'NEON'<br>
-                        SYS.VER: 4.8
+                        SYS.VER: 5.0
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -365,7 +365,7 @@ MOBILE_HTML = """
             setTimeout(() => {
                 bootScreen.style.display = 'none';
                 viewport.style.opacity = '1';
-                startContinuousListening(); // Start the Wake-Word loop
+                startContinuousListening(); // Start the Wake-Word loop automatically
             }, 800);
         }
 
@@ -547,17 +547,25 @@ MOBILE_HTML = """
         }
 
         // ========================================================
-        // CONTINUOUS SPEECH + WAKE WORD + 15S CONVERSATION WINDOW
+        // ENHANCED SPEECH RECOGNITION (ALWAYS ON STANDBY)
         // ========================================================
         let recognition = null;
         let isConversing = false;
         let countdownInterval = null;
         let remainingSeconds = 15;
-        let shouldKeepListening = true;
+        let isSystemAwake = false; 
 
-        const WAKE_WORDS = ["neon", "hey neon", "hi neon", "ok neon", "okay neon", "yo neon", "neo", "leon", "wake up"];
+        const WAKE_PATTERNS = [
+            /^hey\s+neon/i, /^hi\s+neon/i, /^ok\s+neon/i, /^okay\s+neon/i, /^yo\s+neon/i, /^neon/i,
+            /^hey\s+neo/i, /^hi\s+neo/i, /^neo/i,
+            /^hey\s+leon/i, /^hi\s+leon/i, /^leon/i,
+            /^hey\s+n\.?e\.?o\.?n/i, /^n\.?e\.?o\.?n/i,
+            /^hey\s+kneon/i, /^kneon/i,
+            /^hey\s+meon/i, /^meon/i,
+            /^hey\s+ne\s+on/i, /^ne\s+on/i
+        ];
 
-        function initContinuousSpeechEngine() {
+        function initSpeechEngine() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return false;
             
@@ -570,40 +578,40 @@ MOBILE_HTML = """
                 if (isProcessing) return;
 
                 const lastResultIndex = event.results.length - 1;
-                const transcript = event.results[lastResultIndex][0].transcript.trim().toLowerCase();
-                const rawTranscript = event.results[lastResultIndex][0].transcript.trim();
+                const transcript = event.results[lastResultIndex][0].transcript.trim();
                 if (!transcript) return;
 
                 if (!isConversing) {
-                    let triggeredWakeWord = null;
-                    for (const wake of WAKE_WORDS) {
-                        if (transcript.startsWith(wake)) {
-                            triggeredWakeWord = wake;
+                    let matchedPattern = null;
+                    for (const pattern of WAKE_PATTERNS) {
+                        if (pattern.test(transcript)) {
+                            matchedPattern = pattern;
                             break;
                         }
                     }
 
-                    if (triggeredWakeWord) {
-                        let cleanPrompt = rawTranscript.substring(triggeredWakeWord.length).replace(/^[,.\s]+/, '').trim();
-                        if (!cleanPrompt) cleanPrompt = "Hello";
-                        
+                    if (matchedPattern) {
+                        let cleanPrompt = transcript.replace(matchedPattern, '').replace(/^[,.\s]+/, '').trim();
+                        // FIXED: Now defaults to "Neon" so she replies "Sir." instead of "Hello".
+                        if (!cleanPrompt) {
+                            cleanPrompt = "Neon"; 
+                        }
                         isConversing = true;
-                        startConversationCountdown();
                         sendMacro(cleanPrompt);
                     }
                 } else {
-                    sendMacro(rawTranscript);
+                    sendMacro(transcript);
                 }
             };
 
             recognition.onerror = function(event) {
                 if (event.error !== 'no-speech' && event.error !== 'aborted') {
-                    console.log("Speech engine warning:", event.error);
+                    console.log("Speech recognition notice:", event.error);
                 }
             };
 
             recognition.onend = function() {
-                if (shouldKeepListening) {
+                if (isSystemAwake) {
                     try { recognition.start(); } catch(e) {}
                 }
             };
@@ -612,9 +620,9 @@ MOBILE_HTML = """
         }
 
         function startContinuousListening() {
-            shouldKeepListening = true;
-            if (!recognition && !initContinuousSpeechEngine()) {
-                triggerHudNotification("Speech recognition unavailable.");
+            isSystemAwake = true;
+            if (!recognition && !initSpeechEngine()) {
+                triggerHudNotification("Speech recognition not supported on this browser.");
                 return;
             }
             try { recognition.start(); } catch(e) {}
@@ -623,7 +631,10 @@ MOBILE_HTML = """
 
         function manualMicToggle() {
             if (!isConversing) {
-                isConversing = true;
+                if (!recognition && !initSpeechEngine()) {
+                    triggerHudNotification("Speech recognition not supported.");
+                    return;
+                }
                 startConversationCountdown();
             } else {
                 endConversationWindow();
@@ -661,54 +672,77 @@ MOBILE_HTML = """
             const micBtn = document.getElementById('mic-button-el');
             const statBox = document.getElementById('hud-stat-box-el');
             
+            // FIXED: Removed the AUDIO: UNMUTED text to restore your original clean layout.
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = "STATUS: BUSY<br>MIC: PROCESSING<br>WAKE: LOCKED<br>SYS.VER: 4.8";
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>WAKE: LOCKED<br>SYS.VER: 5.0`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 4.8`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.0`;
             } else {
                 micBtn.innerText = "STANDBY (SAY 'NEON')";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = "STATUS: ONLINE<br>MIC: MONITORING<br>WAKE: 'NEON'<br>SYS.VER: 4.8";
+                statBox.innerHTML = `STATUS: ONLINE<br>MIC: MONITORING<br>WAKE: 'NEON'<br>SYS.VER: 5.0`;
             }
         }
 
+        // --- UNIFIED VOICE PLAYBACK & AUTOMATIC DEVICE FALLBACK ---
         function playAiVoiceResponse(data) {
-            if (data.audio_url && !isMuted) {
+            clearConversationCountdown();
+
+            if (isMuted) {
+                isProcessing = false;
+                if (isConversing) startConversationCountdown();
+                return;
+            }
+            
+            if (data.audio_url) {
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
                 currentAudio.onended = () => {
                     isProcessing = false;
-                    startConversationCountdown();
+                    if (isConversing) startConversationCountdown();
                 };
                 currentAudio.onerror = () => {
-                    isProcessing = false;
-                    startConversationCountdown();
+                    fallbackToDeviceSpeech(data.response);
                 };
                 currentAudio.play().catch(e => {
-                    isProcessing = false;
-                    startConversationCountdown();
+                    fallbackToDeviceSpeech(data.response);
                 });
-            } else if (isMuted) {
-                let synth = window.speechSynthesis;
-                let fallbackUtterance = new SpeechSynthesisUtterance(data.response.replace(/<br>/g, ' '));
-                fallbackUtterance.pitch = 0.8;
-                fallbackUtterance.rate = 1.1;
-                fallbackUtterance.onend = () => {
-                    isProcessing = false;
-                    startConversationCountdown();
-                };
-                fallbackUtterance.onerror = () => {
-                    isProcessing = false;
-                    startConversationCountdown();
-                };
-                synth.speak(fallbackUtterance);
             } else {
-                isProcessing = false;
-                startConversationCountdown();
+                fallbackToDeviceSpeech(data.response);
             }
+        }
+
+        function fallbackToDeviceSpeech(textResponse) {
+            if (!('speechSynthesis' in window)) {
+                isProcessing = false;
+                if (isConversing) startConversationCountdown();
+                return;
+            }
+
+            window.speechSynthesis.cancel();
+            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+            const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
+            
+            const voices = window.speechSynthesis.getVoices();
+            const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
+            if (femaleVoice) utterance.voice = femaleVoice;
+
+            utterance.pitch = 0.95;
+            utterance.rate = 1.05;
+
+            utterance.onend = () => {
+                isProcessing = false;
+                if (isConversing) startConversationCountdown();
+            };
+            utterance.onerror = () => {
+                isProcessing = false;
+                if (isConversing) startConversationCountdown();
+            };
+
+            window.speechSynthesis.speak(utterance);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
@@ -744,7 +778,7 @@ MOBILE_HTML = """
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
                 isProcessing = false;
-                startConversationCountdown();
+                if (isConversing) startConversationCountdown();
             }
         }
     </script>
