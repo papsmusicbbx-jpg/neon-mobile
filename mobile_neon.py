@@ -232,9 +232,8 @@ MOBILE_HTML = """
                     <div class="avatar-wrapper"><div class="outer-ring"></div><div class="pulse-ring"></div><div class="inner-core"></div></div>
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: ONLINE<br>
-                        MIC: ARCHIVED<br>
-                        INPUT: KEYBOARD ONLY<br>
-                        SYS.VER: 8.6 (NATIVE BRIDGE)
+                        MIC: STANDBY<br>
+                        SYS.VER: 9.0 (PTT)
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -242,9 +241,9 @@ MOBILE_HTML = """
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
                         <span style="color: #cbd5e1;">> Native hardware bridge connected.</span><br>
-                        <span style="color: #cbd5e1;">> Ready for text input.</span><br>
+                        <span style="color: #cbd5e1;">> Ready for input.</span><br>
                     </div>
-                    <div class="mic-btn" id="mic-button-el" onclick="openKeyboard()">OPEN TERMINAL KEYBOARD</div>
+                    <div class="mic-btn" id="mic-button-el" onclick="manualMicToggle()">TAP TO WAKE N.E.O.N.</div>
                 </div>
             </div>
 
@@ -287,6 +286,12 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
+
+        // Force voice pre-load for Chrome browser fallback
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+            window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
+        }
 
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -353,6 +358,7 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
+        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -384,6 +390,7 @@ MOBILE_HTML = """
             }
         });
 
+        // HUD SWIPE LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -404,6 +411,7 @@ MOBILE_HTML = """
             if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); }
         }, { passive: false });
 
+        // KEYBOARD & INPUT STATE
         let kbString = ""; let isProcessing = false; let currentAudio = null;
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
@@ -437,7 +445,6 @@ MOBILE_HTML = """
                 muteBtn.style.background = "var(--dark)";
                 if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
                 
-                // ALSO MUTE THE NATIVE BRIDGE IF IT EXISTS
                 if (window.AndroidTTS) { window.AndroidTTS.stop(); }
                 else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
                 
@@ -501,14 +508,78 @@ MOBILE_HTML = """
             reader.readAsDataURL(file); event.target.value = ''; 
         }
 
+        // ========================================================
+        // PURE PUSH-TO-TALK LOGIC (WALKIE-TALKIE MODE)
+        // ========================================================
+        let recognition = null;
+        let isListening = false;
+
+        function initSpeechEngine() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return false;
+            
+            recognition = new SpeechRecognition();
+            // PURE WALKIE-TALKIE: Automatically turns off when you stop talking.
+            recognition.continuous = false; 
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = function(event) {
+                const lastResultIndex = event.results.length - 1;
+                const transcript = event.results[lastResultIndex][0].transcript.trim();
+                if (transcript) {
+                    // Instantly kill the mic so she can speak
+                    isListening = false;
+                    if (recognition) { try { recognition.stop(); } catch(e) {} }
+                    sendMacro(transcript);
+                }
+            };
+
+            recognition.onerror = function(event) {
+                console.log("Speech error:", event.error);
+            };
+
+            recognition.onend = function() {
+                isListening = false;
+                updateStatusUI();
+            };
+
+            return true;
+        }
+
+        function manualMicToggle() {
+            if (isProcessing) return; // Prevent interrupting if she is already thinking/speaking
+            
+            if (isListening) {
+                // Manually force mic off early
+                isListening = false;
+                if (recognition) { try { recognition.stop(); } catch(e) {} }
+                updateStatusUI();
+            } else {
+                // Open mic to listen
+                if (!recognition) initSpeechEngine();
+                try { recognition.start(); } catch(e) {}
+                isListening = true;
+                updateStatusUI();
+            }
+        }
+
         function updateStatusUI() {
             const micBtn = document.getElementById('mic-button-el');
+            const statBox = document.getElementById('hud-stat-box-el');
+            
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 9.0 (PTT)`;
+            } else if (isListening) {
+                micBtn.innerText = "🎙️ LISTENING...";
+                micBtn.className = "mic-btn conversing";
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE<br>SYS.VER: 9.0 (PTT)`;
             } else {
-                micBtn.innerText = "OPEN TERMINAL KEYBOARD";
+                micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
+                statBox.innerHTML = `STATUS: ONLINE<br>MIC: STANDBY<br>SYS.VER: 9.0 (PTT)`;
             }
         }
 
@@ -544,11 +615,8 @@ MOBILE_HTML = """
 
             // --- THE NATIVE ANDROID BRIDGE ---
             if (window.AndroidTTS) {
-                triggerHudNotification("Native Hardware Voice Linked.");
                 window.AndroidTTS.speak(cleanSpokenText);
                 return; 
-                // We don't need a timeout here. 
-                // Android's hardware will literally tell the HTML when it is done speaking via finishProcessing()
             }
 
             // --- THE PC / CHROME FALLBACK ---
@@ -569,7 +637,16 @@ MOBILE_HTML = """
             }, 50);
         }
 
-        function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
+        function sendMacro(text) { 
+            if (isProcessing) return; 
+            
+            // ALWAYS force kill mic before talking to server to free audio channel
+            isListening = false;
+            if (recognition) { try { recognition.stop(); } catch(e) {} }
+            
+            kbString = text; 
+            executeKeyboard(); 
+        }
 
         async function executeKeyboard() {
             if (isProcessing) return; 
@@ -602,6 +679,35 @@ MOBILE_HTML = """
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
+                finishProcessing();
+            }
+        }
+        
+        async function sendImageToNeon(base64Image) {
+            if (isProcessing) return; 
+            
+            isListening = false;
+            if (recognition) { try { recognition.stop(); } catch(e) {} }
+            
+            isProcessing = true;
+            updateStatusUI();
+
+            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
+            if (window.AndroidTTS) { window.AndroidTTS.stop(); }
+            else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+            
+            chatBox.innerHTML += `<br>> <b>User:</b> 📸 [Captured photo]`; chatBox.scrollTop = chatBox.scrollHeight;
+            const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is analyzing visual feed...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
+            goToScreen(0); 
+            try {
+                const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: "Describe what you see in this picture concise and clearly.", image: base64Image, is_muted: isMuted }) });
+                const data = await response.json();
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
+                chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
+                
+                playAiVoiceResponse(data);
+            } catch (error) {
+                const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); chatBox.innerHTML += `<br>> <span style="color:red;">Error processing vision scan.</span>`;
                 finishProcessing();
             }
         }
