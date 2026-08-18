@@ -233,7 +233,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: SLEEPING<br>
                         MIC: OFFLINE<br>
-                        SYS.VER: 5.9
+                        SYS.VER: 6.0 PTT
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -285,6 +285,16 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
+        
+        // CRITICAL FIX 1: This stops Android from deleting the voice out of memory mid-sentence
+        window.__neonUtterance = null;
+
+        // Force Android WebView to dynamically map voices asynchronously
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.getVoices();
+            };
+        }
 
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -351,6 +361,7 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
+        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -381,6 +392,7 @@ MOBILE_HTML = """
             }
         });
 
+        // HUD LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -409,8 +421,15 @@ MOBILE_HTML = """
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
         
-        function typeChar(char) { kbString += char; updateKbDisplay(); }
-        function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
+        function typeChar(char) { 
+            kbString += char; 
+            updateKbDisplay(); 
+        }
+        
+        function backspace() { 
+            kbString = kbString.slice(0, -1); 
+            updateKbDisplay(); 
+        }
         
         function updateKbDisplay() { 
             kbDisplay.innerText = kbString + "_"; 
@@ -499,7 +518,6 @@ MOBILE_HTML = """
             clearConversationCountdown();
             
             if (recognition) { try { recognition.stop(); } catch(e) {} }
-            
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
             if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
             
@@ -574,7 +592,7 @@ MOBILE_HTML = """
             };
 
             recognition.onend = function() {
-                // STRICT RULE: Only restart if explicitly inside the 15-second window AND not processing.
+                // ONLY restart if explicitly inside the 15-second window AND not processing.
                 if (isConversing && !isProcessing) {
                     try { recognition.start(); } catch(e) {}
                 }
@@ -590,10 +608,14 @@ MOBILE_HTML = """
                     return;
                 }
                 
-                // Wake her up manually via Tap
-                isConversing = true;
+                // CRITICAL FIX 2: Unlock Android Voice Engine with an invisible 0.01 volume click
+                if ('speechSynthesis' in window) {
+                    let unlockUtterance = new SpeechSynthesisUtterance('.');
+                    unlockUtterance.volume = 0.01;
+                    window.speechSynthesis.speak(unlockUtterance);
+                }
                 
-                // Send a silent greeting to trigger her logic. Mic stays OFF until she finishes speaking.
+                isConversing = true;
                 sendMacro("Neon");
                 
             } else {
@@ -607,7 +629,6 @@ MOBILE_HTML = """
             remainingSeconds = 15;
             updateHudStateUI();
 
-            // Safe restart of the mic NOW that she is done speaking
             if (recognition && !isProcessing) {
                 try { recognition.start(); } catch(e) {}
             }
@@ -644,15 +665,15 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 5.9`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 6.0 PTT`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 5.9`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 6.0 PTT`;
             } else {
                 micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 5.9`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 6.0 PTT`;
             }
         }
 
@@ -692,27 +713,47 @@ MOBILE_HTML = """
 
             window.speechSynthesis.cancel();
             
-            // Clean exactly as it was originally written when it worked for you
-            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
-            const utterance = new SpeechSynthesisUtterance(cleanSpokenText);
-            
-            let voices = window.speechSynthesis.getVoices();
-            const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
-            if (femaleVoice) utterance.voice = femaleVoice;
+            setTimeout(() => {
+                const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+                
+                // CRITICAL FIX 1: Apply to global variable so Android memory garbage collector can't delete it
+                window.__neonUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
+                window.__neonUtterance.lang = 'en-US'; 
+                
+                let voices = window.speechSynthesis.getVoices();
+                if (voices.length > 0) {
+                    const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
+                    if (femaleVoice) window.__neonUtterance.voice = femaleVoice;
+                }
 
-            utterance.pitch = 0.95;
-            utterance.rate = 1.05;
+                window.__neonUtterance.pitch = 0.95;
+                window.__neonUtterance.rate = 1.05;
 
-            utterance.onend = () => {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
-            };
-            utterance.onerror = () => {
-                isProcessing = false;
-                if (isConversing) startConversationCountdown();
-            };
+                window.__neonUtterance.onend = () => {
+                    if(isProcessing) {
+                        isProcessing = false;
+                        if (isConversing) startConversationCountdown();
+                    }
+                };
+                window.__neonUtterance.onerror = () => {
+                    if(isProcessing) {
+                        isProcessing = false;
+                        if (isConversing) startConversationCountdown();
+                    }
+                };
 
-            window.speechSynthesis.speak(utterance);
+                window.speechSynthesis.speak(window.__neonUtterance);
+                
+                // CRITICAL FIX 3: Android Watchdog Timer. If Android bugs out and forgets to send the "I am done talking" signal, this resets the mic automatically after 1 second of silence.
+                let watchdog = setInterval(() => {
+                    if (!window.speechSynthesis.speaking && isProcessing) {
+                        clearInterval(watchdog);
+                        isProcessing = false;
+                        if (isConversing) startConversationCountdown();
+                    }
+                }, 1000);
+
+            }, 50);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
@@ -724,7 +765,6 @@ MOBILE_HTML = """
             
             isProcessing = true;
             
-            // Kill the mic so she can process and speak without the phone muting her
             if (recognition) { try { recognition.stop(); } catch(e) {} }
             
             clearConversationCountdown();
