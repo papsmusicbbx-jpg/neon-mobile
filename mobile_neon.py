@@ -234,14 +234,14 @@ MOBILE_HTML = """
                         STATUS: ONLINE<br>
                         MIC: ARCHIVED<br>
                         INPUT: KEYBOARD ONLY<br>
-                        SYS.VER: 8.5 (ISOLATED)
+                        SYS.VER: 8.6 (NATIVE BRIDGE)
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
                 <div id="terminal-panel">
                     <div id="chat-box">
                         <span style="color: var(--main);">> Global link established.</span><br>
-                        <span style="color: #cbd5e1;">> Microphone subsystem temporarily archived.</span><br>
+                        <span style="color: #cbd5e1;">> Native hardware bridge connected.</span><br>
                         <span style="color: #cbd5e1;">> Ready for text input.</span><br>
                     </div>
                     <div class="mic-btn" id="mic-button-el" onclick="openKeyboard()">OPEN TERMINAL KEYBOARD</div>
@@ -287,12 +287,6 @@ MOBILE_HTML = """
         let humOsc = null;
         let humGain = null;
         let isMuted = false;
-
-        // Force voice pre-load
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.getVoices();
-            window.speechSynthesis.onvoiceschanged = () => { window.speechSynthesis.getVoices(); };
-        }
 
         function initAudio() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -359,7 +353,6 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
-        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -368,13 +361,6 @@ MOBILE_HTML = """
             initAudio();
             playBootSound();
             
-            // Sneaky Audio Unlocker - Runs exact moment of physical screen tap
-            if ('speechSynthesis' in window) {
-                let warmup = new SpeechSynthesisUtterance('');
-                warmup.volume = 0;
-                window.speechSynthesis.speak(warmup);
-            }
-
             bootScreen.style.opacity = '0';
             setTimeout(() => {
                 bootScreen.style.display = 'none';
@@ -398,7 +384,6 @@ MOBILE_HTML = """
             }
         });
 
-        // HUD SWIPE LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -419,7 +404,6 @@ MOBILE_HTML = """
             if (!e.target.closest('#chat-box') && !e.target.closest('.grid-container') && !e.target.closest('#boot-screen')) { e.preventDefault(); }
         }, { passive: false });
 
-        // KEYBOARD & INPUT STATE
         let kbString = ""; let isProcessing = false; let currentAudio = null;
         const kbDisplay = document.getElementById('kb-text');
         const kbOverlay = document.getElementById('keyboard-overlay');
@@ -452,7 +436,11 @@ MOBILE_HTML = """
                 muteBtn.innerText = "🔊 Unmute"; 
                 muteBtn.style.background = "var(--dark)";
                 if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; }
-                if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+                
+                // ALSO MUTE THE NATIVE BRIDGE IF IT EXISTS
+                if (window.AndroidTTS) { window.AndroidTTS.stop(); }
+                else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+                
                 if (humGain && audioCtx) humGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
                 triggerHudNotification("Audio muted (Text-only mode).");
             } else {
@@ -527,69 +515,56 @@ MOBILE_HTML = """
         // ========================================================
         // ISOLATED TEXT-TO-SPEECH LOGIC
         // ========================================================
+        
+        // This function is triggered by Android Kotlin when she finishes her native sentence!
+        function finishProcessing() {
+            isProcessing = false;
+            updateStatusUI();
+        }
+        
         function playAiVoiceResponse(data) {
             if (isMuted) {
-                isProcessing = false;
-                updateStatusUI();
+                finishProcessing();
                 return;
             }
             
-            // Check if ElevenLabs actually sent us an audio file back
             if (data.audio_url) {
                 triggerHudNotification("Playing ElevenLabs audio...");
                 currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                
-                currentAudio.onended = () => {
-                    isProcessing = false;
-                    updateStatusUI();
-                };
-                currentAudio.onerror = () => {
-                    // If the ElevenLabs MP3 file fails to play
-                    fallbackToDeviceSpeech(data.response);
-                };
-                
-                currentAudio.play().catch(() => {
-                    fallbackToDeviceSpeech(data.response);
-                });
+                currentAudio.onended = finishProcessing;
+                currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
+                currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
             } else {
-                // ElevenLabs returned NULL (out of tokens or API error)
                 fallbackToDeviceSpeech(data.response);
             }
         }
 
         function fallbackToDeviceSpeech(textResponse) {
-            if (!('speechSynthesis' in window)) {
-                triggerHudNotification("Device TTS not supported.");
-                isProcessing = false;
-                updateStatusUI();
-                return;
+            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+
+            // --- THE NATIVE ANDROID BRIDGE ---
+            if (window.AndroidTTS) {
+                triggerHudNotification("Native Hardware Voice Linked.");
+                window.AndroidTTS.speak(cleanSpokenText);
+                return; 
+                // We don't need a timeout here. 
+                // Android's hardware will literally tell the HTML when it is done speaking via finishProcessing()
             }
 
-            triggerHudNotification("Using offline Android backup voice.");
-            
-            // Cancel any glitched audio
+            // --- THE PC / CHROME FALLBACK ---
+            if (!('speechSynthesis' in window)) {
+                triggerHudNotification("Device TTS not supported.");
+                finishProcessing();
+                return;
+            }
+            triggerHudNotification("Using browser offline backup voice.");
             window.speechSynthesis.cancel();
             
-            // Wait slightly so Android doesn't swallow the command
             setTimeout(() => {
-                const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
-                
-                // Store in global window variable so Garbage Collector doesn't delete it
                 window.__neonBackupVoice = new SpeechSynthesisUtterance(cleanSpokenText);
                 window.__neonBackupVoice.lang = 'en-US'; 
-                
-                window.__neonBackupVoice.onend = () => {
-                    isProcessing = false;
-                    updateStatusUI();
-                };
-                
-                window.__neonBackupVoice.onerror = (e) => {
-                    console.log("TTS Error:", e);
-                    triggerHudNotification("Android TTS Engine Error.");
-                    isProcessing = false;
-                    updateStatusUI();
-                };
-
+                window.__neonBackupVoice.onend = finishProcessing;
+                window.__neonBackupVoice.onerror = finishProcessing;
                 window.speechSynthesis.speak(window.__neonBackupVoice);
             }, 50);
         }
@@ -605,7 +580,8 @@ MOBILE_HTML = """
             updateStatusUI();
 
             if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
+            if (window.AndroidTTS) { window.AndroidTTS.stop(); }
+            else if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
 
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
@@ -626,8 +602,7 @@ MOBILE_HTML = """
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
                 chatBox.innerHTML += `<br>> <span style="color:red;">Error connecting to host.</span>`;
-                isProcessing = false;
-                updateStatusUI();
+                finishProcessing();
             }
         }
     </script>
