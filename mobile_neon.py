@@ -36,7 +36,7 @@ INDEX_NAME = "neon-memory"
 
 eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY) if ELEVENLABS_API_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-llm = ChatGroq(model="llama-3.1-70b-versatile", api_key=GROQ_API_KEY, temperature=0.3)
+llm = ChatGroq(model="llama3-70b-8192", api_key=GROQ_API_KEY, temperature=0.3)
 
 class ServerlessEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
