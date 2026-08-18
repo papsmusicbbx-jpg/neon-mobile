@@ -233,7 +233,7 @@ MOBILE_HTML = """
                     <div class="hud-stat-box" id="hud-stat-box-el">
                         STATUS: SLEEPING<br>
                         MIC: OFFLINE<br>
-                        SYS.VER: 7.1 (ANDROID FIX)
+                        SYS.VER: 7.2 (BUFFER)
                     </div>
                     <div style="font-size: 8px; color: var(--main); text-align: center; letter-spacing: 0.5px;">SWIPE LEFT ➔<br>COMMAND DECK</div>
                 </div>
@@ -351,7 +351,6 @@ MOBILE_HTML = """
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
-        // BOOT SCREEN LOGIC
         let lastTap = 0;
         const bootScreen = document.getElementById('boot-screen');
         const viewport = document.getElementById('viewport-wrapper');
@@ -382,7 +381,6 @@ MOBILE_HTML = """
             }
         });
 
-        // HUD LOGIC
         let touchstartX = 0; let touchendX = 0; let currentScreen = 0; let toastTimeout = null;
         const appContainer = document.getElementById('app-container');
 
@@ -411,15 +409,8 @@ MOBILE_HTML = """
         function openKeyboard() { kbOverlay.style.top = '0px'; }
         function closeKeyboard() { kbOverlay.style.top = '100dvh'; }
         
-        function typeChar(char) { 
-            kbString += char; 
-            updateKbDisplay(); 
-        }
-        
-        function backspace() { 
-            kbString = kbString.slice(0, -1); 
-            updateKbDisplay(); 
-        }
+        function typeChar(char) { kbString += char; updateKbDisplay(); }
+        function backspace() { kbString = kbString.slice(0, -1); updateKbDisplay(); }
         
         function updateKbDisplay() { 
             kbDisplay.innerText = kbString + "_"; 
@@ -506,6 +497,7 @@ MOBILE_HTML = """
         async function sendImageToNeon(base64Image) {
             if (isProcessing) return; 
             
+            // Instantly stop the mic to free audio focus
             if (recognition) { try { recognition.stop(); } catch(e) {} }
             pauseConversationTimer();
             isProcessing = true;
@@ -589,8 +581,10 @@ MOBILE_HTML = """
 
         function manualMicToggle() {
             if (isConversing || isProcessing) {
+                // Manually force her to sleep
                 forceSleep();
             } else {
+                // Manually wake her up
                 isConversing = true;
                 if (!recognition) initSpeechEngine();
                 try { recognition.start(); } catch(e) {}
@@ -641,15 +635,15 @@ MOBILE_HTML = """
             if (isProcessing) {
                 micBtn.innerText = "⏳ THINKING...";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 7.1 (ANDROID FIX)`;
+                statBox.innerHTML = `STATUS: BUSY<br>MIC: PROCESSING<br>SYS.VER: 7.2 (BUFFER)`;
             } else if (isConversing) {
                 micBtn.innerText = `🎙️ LISTENING (${remainingSeconds}s)`;
                 micBtn.className = "mic-btn conversing";
-                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 7.1 (ANDROID FIX)`;
+                statBox.innerHTML = `STATUS: ENGAGED<br>MIC: ACTIVE WINDOW<br>REMAINING: ${remainingSeconds}s<br>SYS.VER: 7.2 (BUFFER)`;
             } else {
                 micBtn.innerText = "TAP TO WAKE N.E.O.N.";
                 micBtn.className = "mic-btn";
-                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 7.1 (ANDROID FIX)`;
+                statBox.innerHTML = `STATUS: SLEEPING<br>MIC: OFFLINE<br>SYS.VER: 7.2 (BUFFER)`;
             }
         }
 
@@ -660,14 +654,19 @@ MOBILE_HTML = """
                 return;
             }
             
-            if (data.audio_url) {
-                currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
-                currentAudio.onended = finishProcessing;
-                currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
-                currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
-            } else {
-                fallbackToDeviceSpeech(data.response);
-            }
+            // THE FIX: Wait exactly 500 milliseconds before playing any audio.
+            // This gives Android's slow hardware time to turn off the microphone 
+            // so it doesn't accidentally block the speaker!
+            setTimeout(() => {
+                if (data.audio_url) {
+                    currentAudio = new Audio(data.audio_url + '&t=' + new Date().getTime());
+                    currentAudio.onended = finishProcessing;
+                    currentAudio.onerror = () => fallbackToDeviceSpeech(data.response);
+                    currentAudio.play().catch(() => fallbackToDeviceSpeech(data.response));
+                } else {
+                    fallbackToDeviceSpeech(data.response);
+                }
+            }, 500);
         }
 
         function fallbackToDeviceSpeech(textResponse) {
@@ -676,42 +675,20 @@ MOBILE_HTML = """
                 return;
             }
 
-            // CRITICAL ANDROID FIX 1: Clear out any stuck audio queue
-            window.speechSynthesis.cancel();
+            // Bare-bones, pure Text-to-Speech call. 
+            // No hacks, no voice searching, no lang enforcement. Let Android handle it natively.
+            const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
+            
+            window.__neonUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
+            window.__neonUtterance.onend = finishProcessing;
+            window.__neonUtterance.onerror = finishProcessing;
 
-            // CRITICAL ANDROID FIX 2: Wait 200ms before sending the speak command so the cancel clears properly.
+            window.speechSynthesis.speak(window.__neonUtterance);
+            
+            // Failsafe: Unstick the UI after 10 seconds if Android gets permanently confused
             setTimeout(() => {
-                const cleanSpokenText = textResponse.replace(/<br>/g, ' ').replace(/[*#_`~-]/g, '');
-                
-                // CRITICAL ANDROID FIX 3: Assign to global window object to prevent Garbage Collection deletion
-                window.neonTTSUtterance = new SpeechSynthesisUtterance(cleanSpokenText);
-                window.neonTTSUtterance.lang = 'en-US'; 
-                
-                let voices = window.speechSynthesis.getVoices();
-                if (voices.length > 0) {
-                    const femaleVoice = voices.find(v => (v.lang.includes('en') && (v.name.includes('Female') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Natural'))));
-                    if (femaleVoice) window.neonTTSUtterance.voice = femaleVoice;
-                }
-
-                window.neonTTSUtterance.pitch = 0.95;
-                window.neonTTSUtterance.rate = 1.05;
-
-                window.neonTTSUtterance.onend = finishProcessing;
-                window.neonTTSUtterance.onerror = function(e) {
-                    console.log("TTS Error:", e);
-                    finishProcessing();
-                };
-
-                window.speechSynthesis.speak(window.neonTTSUtterance);
-
-                // Watchdog to prevent getting permanently stuck if Android crashes
-                let watchdog = setInterval(() => {
-                    if (!window.speechSynthesis.speaking && isProcessing) {
-                        clearInterval(watchdog);
-                        finishProcessing();
-                    }
-                }, 1000);
-            }, 200); 
+                if (isProcessing) finishProcessing();
+            }, 10000);
         }
 
         function sendMacro(text) { if (isProcessing) return; kbString = text; executeKeyboard(); }
@@ -721,18 +698,17 @@ MOBILE_HTML = """
             const text = kbString.trim(); 
             if(text === "") { closeKeyboard(); return; }
             
+            // 1. STOP THE MIC INSTANTLY
             if (recognition) { try { recognition.stop(); } catch(e) {} }
             pauseConversationTimer();
             isProcessing = true;
             updateHudStateUI();
 
-            if (currentAudio) { currentAudio.pause(); currentAudio.currentTime = 0; currentAudio = null; }
-            if ('speechSynthesis' in window) { window.speechSynthesis.cancel(); }
-
             chatBox.innerHTML += `<br>> <b>User:</b> ${text}`; chatBox.scrollTop = chatBox.scrollHeight;
             const thinkingId = "think-" + Date.now(); chatBox.innerHTML += `<br><span id="${thinkingId}" style="color: var(--accent); font-style: italic;">> N.E.O.N. is processing...</span>`; chatBox.scrollTop = chatBox.scrollHeight;
             kbString = ""; updateKbDisplay(); closeKeyboard(); goToScreen(0);
             
+            // 2. FETCH THE RESPONSE
             try {
                 const response = await fetch('/chat', { 
                     method: 'POST', 
@@ -743,6 +719,7 @@ MOBILE_HTML = """
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove();
                 chatBox.innerHTML += `<br>> <b>N.E.O.N.:</b> ${data.response}`; chatBox.scrollTop = chatBox.scrollHeight;
                 
+                // 3. PLAY THE AUDIO
                 playAiVoiceResponse(data);
             } catch (error) {
                 const thnkEl = document.getElementById(thinkingId); if(thnkEl) thnkEl.remove(); 
